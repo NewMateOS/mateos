@@ -1,0 +1,4 @@
+#!/bin/bash
+
+echo $(git -C "$MATEOS_PATH" rev-parse --abbrev-ref HEAD)
+

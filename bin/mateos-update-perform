@@ -1,0 +1,9 @@
+#!/bin/bash
+
+set -e
+
+mateos-update-available-reset
+mateos-update-system-pkgs
+mateos-migrate
+mateos-hook post-update
+mateos-update-restart

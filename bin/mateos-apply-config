@@ -1,0 +1,140 @@
+#!/bin/bash
+
+echo "🔧 Aplicando configuraciones de MateOS..."
+echo ""
+
+MATEOS_PATH="${MATEOS_PATH:-$HOME/.local/share/mateOS}"
+BACKUP_DIR="$HOME/.config/mateos-backups/$(date +%Y%m%d-%H%M%S)"
+
+# Función para hacer backup
+backup_if_exists() {
+    local file="$1"
+    if [ -f "$file" ] || [ -d "$file" ]; then
+        mkdir -p "$BACKUP_DIR"
+        cp -r "$file" "$BACKUP_DIR/" 2>/dev/null
+        echo "  📦 Backup: $(basename "$file")"
+    fi
+}
+
+# 1. Configuraciones de Hyprland
+echo "1️⃣  Configurando Hyprland..."
+if [ -d "$MATEOS_PATH/config/hypr" ]; then
+    backup_if_exists "$HOME/.config/hypr"
+    mkdir -p "$HOME/.config/hypr"
+    cp -r "$MATEOS_PATH/config/hypr/"* "$HOME/.config/hypr/"
+    echo "   ✅ Hyprland configurado"
+fi
+
+# 2. Waybar
+echo "2️⃣  Configurando Waybar..."
+if [ -d "$MATEOS_PATH/config/waybar" ]; then
+    backup_if_exists "$HOME/.config/waybar"
+    mkdir -p "$HOME/.config/waybar"
+    cp -r "$MATEOS_PATH/config/waybar/"* "$HOME/.config/waybar/"
+    echo "   ✅ Waybar configurado"
+fi
+
+# 3. Kitty
+echo "3️⃣  Configurando Kitty..."
+if [ -d "$MATEOS_PATH/config/kitty" ]; then
+    backup_if_exists "$HOME/.config/kitty"
+    mkdir -p "$HOME/.config/kitty"
+    cp -r "$MATEOS_PATH/config/kitty/"* "$HOME/.config/kitty/"
+    echo "   ✅ Kitty configurado"
+fi
+
+# 4. SwayOSD
+echo "4️⃣  Configurando SwayOSD..."
+if [ -d "$MATEOS_PATH/config/swayosd" ]; then
+    backup_if_exists "$HOME/.config/swayosd"
+    mkdir -p "$HOME/.config/swayosd"
+    cp -r "$MATEOS_PATH/config/swayosd/"* "$HOME/.config/swayosd/"
+    echo "   ✅ SwayOSD configurado"
+fi
+
+# 5. UWSM (ya lo tienes, solo verificar)
+echo "5️⃣  Verificando UWSM..."
+if [ -f "$HOME/.config/uwsm/env" ]; then
+    if grep -q "MATEOS_PATH" "$HOME/.config/uwsm/env"; then
+        echo "   ✅ UWSM ya configurado"
+    else
+        echo "   ⚠️  Añade esto a ~/.config/uwsm/env:"
+        echo "      export MATEOS_PATH=\$HOME/.local/share/mateOS"
+        echo "      export PATH=\$MATEOS_PATH/bin/:\$PATH"
+    fi
+else
+    echo "   ℹ️  UWSM no encontrado"
+fi
+
+# 6. Walker
+echo "6️⃣  Configurando Walker..."
+if [ -d "$MATEOS_PATH/config/walker" ]; then
+    backup_if_exists "$HOME/.config/walker"
+    mkdir -p "$HOME/.config/walker"
+    cp -r "$MATEOS_PATH/config/walker/"* "$HOME/.config/walker/"
+    echo "   ✅ Walker configurado"
+fi
+
+# 7. Fontconfig
+echo "7️⃣  Configurando Fontconfig..."
+if [ -f "$MATEOS_PATH/config/fontconfig/fonts.conf" ]; then
+    backup_if_exists "$HOME/.config/fontconfig/fonts.conf"
+    mkdir -p "$HOME/.config/fontconfig"
+    cp "$MATEOS_PATH/config/fontconfig/fonts.conf" "$HOME/.config/fontconfig/"
+    echo "   ✅ Fontconfig configurado"
+fi
+
+# 8. Systemd services
+echo "8️⃣  Configurando servicios systemd..."
+if [ -d "$MATEOS_PATH/config/systemd" ]; then
+    mkdir -p "$HOME/.config/systemd/user"
+    cp -r "$MATEOS_PATH/config/systemd/user/"* "$HOME/.config/systemd/user/" 2>/dev/null
+    systemctl --user daemon-reload
+    echo "   ✅ Servicios systemd copiados"
+    echo "   💡 Para activar battery monitor:"
+    echo "      systemctl --user enable --now mateos-battery-monitor.timer"
+fi
+
+# 9. Starship
+echo "9️⃣  Configurando Starship..."
+if [ -f "$MATEOS_PATH/config/starship.toml" ]; then
+    backup_if_exists "$HOME/.config/starship.toml"
+    cp "$MATEOS_PATH/config/starship.toml" "$HOME/.config/"
+    echo "   ✅ Starship configurado"
+fi
+
+# 10. Flags de navegadores
+echo "🔟 Configurando flags de navegadores..."
+for flag_file in chromium-flags.conf brave-flags.conf; do
+    if [ -f "$MATEOS_PATH/config/$flag_file" ]; then
+        backup_if_exists "$HOME/.config/$flag_file"
+        cp "$MATEOS_PATH/config/$flag_file" "$HOME/.config/"
+        echo "   ✅ $(basename $flag_file) configurado"
+    fi
+done
+
+# Crear estructura de MateOS
+echo ""
+echo "📁 Creando estructura de directorios..."
+mkdir -p "$HOME/.config/mateos/"{themes,current,hooks}
+mkdir -p "$HOME/.local/state/mateos/toggles"
+echo "   ✅ Directorios creados"
+
+# Resumen
+echo ""
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo "✅ Configuración aplicada!"
+echo ""
+if [ -d "$BACKUP_DIR" ]; then
+    echo "📦 Backup guardado en:"
+    echo "   $BACKUP_DIR"
+    echo ""
+fi
+echo "🔄 Para aplicar los cambios:"
+echo "   • Reinicia Hyprland: hyprctl reload"
+echo "   • O reinicia sesión completa"
+echo ""
+echo "💡 Siguiente paso:"
+echo "   source ~/.config/uwsm/env"
+echo "   mateos-verify"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"

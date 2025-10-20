@@ -1,0 +1,4 @@
+#!/bin/bash
+
+cmd="$*"
+exec setsid uwsm-app -- kitty -o font.size=9 --class=MateOS --title=MateOS -e bash -c "mateos-show-logo; $cmd; mateos-show-done"

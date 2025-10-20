@@ -1,0 +1,84 @@
+#!/bin/bash
+
+echo "🔍 Verificando instalación de MateOS..."
+echo ""
+
+ERRORS=0
+WARNINGS=0
+
+# Check MATEOS_PATH
+if [ -z "$MATEOS_PATH" ]; then
+  echo "❌ MATEOS_PATH no está configurada"
+  echo "   Solución: source ~/.config/uwsm/env"
+  ((ERRORS++))
+else
+  echo "✅ MATEOS_PATH: $MATEOS_PATH"
+fi
+
+# Check PATH
+if [[ ":$PATH:" != *":$MATEOS_PATH/bin:"* ]]; then
+  echo "❌ MateOS bin no está en PATH"
+  ((ERRORS++))
+else
+  echo "✅ PATH configurado correctamente"
+fi
+
+# Check version file
+if [ -f "$MATEOS_PATH/version" ]; then
+  VERSION=$(cat "$MATEOS_PATH/version")
+  echo "✅ Versión: $VERSION"
+else
+  echo "❌ Archivo version no encontrado"
+  ((ERRORS++))
+fi
+
+# Check scripts
+SCRIPT_COUNT=$(ls -1 "$MATEOS_PATH/bin" 2>/dev/null | wc -l)
+if [ "$SCRIPT_COUNT" -gt 100 ]; then
+  echo "✅ Scripts: $SCRIPT_COUNT"
+else
+  echo "⚠️  Scripts: $SCRIPT_COUNT (esperados ~118)"
+  ((WARNINGS++))
+fi
+
+# Check required commands
+echo ""
+echo "🔧 Dependencias:"
+for cmd in hyprctl kitty waybar gum jq uwsm-app; do
+  if command -v $cmd &>/dev/null; then
+    echo "  ✅ $cmd"
+  else
+    echo "  ⚠️  $cmd (opcional, pero recomendado)"
+    ((WARNINGS++))
+  fi
+done
+
+# Check directories
+echo ""
+echo "📁 Directorios:"
+for dir in ~/.config/mateos ~/.local/state/mateos; do
+  if [ -d "$dir" ]; then
+    echo "  ✅ $dir"
+  else
+    echo "  ⚠️  $dir (no existe, se creará cuando sea necesario)"
+    ((WARNINGS++))
+  fi
+done
+
+# Summary
+echo ""
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+if [ $ERRORS -eq 0 ]; then
+  if [ $WARNINGS -eq 0 ]; then
+    echo "✅ MateOS está correctamente instalado y configurado!"
+  else
+    echo "✅ MateOS está funcional (con $WARNINGS advertencias menores)"
+  fi
+  echo ""
+  echo "Prueba ejecutando: mateos-version"
+else
+  echo "❌ Se encontraron $ERRORS errores"
+  echo ""
+  echo "Revisa ~/.local/share/mateOS/SETUP.md para soluciones"
+fi
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"

@@ -1,0 +1,4 @@
+#!/bin/bash
+
+mateos-refresh-config fastfetch/config.jsonc
+

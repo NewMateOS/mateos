@@ -1,0 +1,15 @@
+#!/bin/bash
+
+TOGGLE_FILE=~/.local/state/mateos/toggles/screensaver-off
+
+mkdir -p "$(dirname "$TOGGLE_FILE")"
+
+if [[ -f "$TOGGLE_FILE" ]]; then
+  rm "$TOGGLE_FILE"
+  notify-send "Screensaver activado"
+else
+  touch "$TOGGLE_FILE"
+  pkill -f "kitty --class Screensaver"
+  notify-send "Screensaver desactivado"
+fi
+

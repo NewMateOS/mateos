@@ -1,0 +1,10 @@
+#!/bin/bash
+
+if pgrep -x hypridle >/dev/null; then
+  pkill -x hypridle
+  notify-send "Bloqueo automático desactivado"
+else
+  uwsm-app -- hypridle >/dev/null 2>&1 &
+  notify-send "Bloqueo automático activado"
+fi
+

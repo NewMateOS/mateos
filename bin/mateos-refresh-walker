@@ -1,0 +1,7 @@
+#!/bin/bash
+
+mateos-refresh-config walker/config.toml
+mateos-refresh-config elephant/calc.toml
+mateos-refresh-config elephant/desktopapplications.toml
+mateos-restart-walker
+

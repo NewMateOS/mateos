@@ -1,0 +1,4 @@
+#!/bin/bash
+
+exec setsid uwsm-app -- kitty --class=MateOS -o font.size=9 -e bash -c 'fastfetch; read -n 1 -s'
+

@@ -1,0 +1,11 @@
+#!/bin/bash
+
+set -e
+echo -e "\e[32mUpdate Firmware\e[0m"
+
+if mateos-cmd-missing fwupdmgr; then
+  mateos-pkg-add fwupd
+fi
+
+fwupdmgr refresh
+sudo fwupdmgr update

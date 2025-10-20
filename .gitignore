@@ -1,0 +1,26 @@
+# System files
+.DS_Store
+*.log
+*.tmp
+
+# State files (user-specific)
+.local/state/
+
+# User configs (don't commit personal configs)
+config/chromium/Default/Preferences
+config/environment.d/
+
+# Editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Compiled files
+*.pyc
+__pycache__/
+
+# Local testing
+test/
+.test/
