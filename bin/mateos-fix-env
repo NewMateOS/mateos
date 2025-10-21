@@ -1,0 +1,174 @@
+#!/bin/bash
+
+# MateOS Environment Fixer
+# Script para aplicar variables de entorno a todos los comandos
+
+MATEOS_PATH="${MATEOS_PATH:-$HOME/.local/share/mateOS}"
+
+# Cargar variables de entorno
+if [ -f "$MATEOS_PATH/config/mateos-vars.sh" ]; then
+    source "$MATEOS_PATH/config/mateos-vars.sh"
+fi
+
+# Función para aplicar variables a un comando
+fix_command_env() {
+    local cmd_path="$1"
+    local cmd_name=$(basename "$cmd_path")
+    
+    echo "🔧 Aplicando variables a: $cmd_name"
+    
+    # Crear backup del archivo original
+    cp "$cmd_path" "$cmd_path.backup" 2>/dev/null
+    
+    # Crear archivo temporal con las variables
+    cat > "$cmd_path.tmp" << 'EOF'
+#!/bin/bash
+
+# Cargar variables de entorno centralizadas
+MATEOS_PATH="${MATEOS_PATH:-$HOME/.local/share/mateOS}"
+if [ -f "$MATEOS_PATH/config/mateos-vars.sh" ]; then
+    source "$MATEOS_PATH/config/mateos-vars.sh"
+fi
+
+EOF
+    
+    # Agregar contenido original (saltando shebang si existe)
+    if head -1 "$cmd_path" | grep -q "^#!/"; then
+        tail -n +2 "$cmd_path" >> "$cmd_path.tmp"
+    else
+        cat "$cmd_path" >> "$cmd_path.tmp"
+    fi
+    
+    # Reemplazar archivo original
+    mv "$cmd_path.tmp" "$cmd_path"
+    chmod +x "$cmd_path"
+    
+    echo "✅ Variables aplicadas a: $cmd_name"
+}
+
+# Función para aplicar a todos los comandos
+fix_all_commands() {
+    echo "🔧 Aplicando variables de entorno a todos los comandos..."
+    echo ""
+    
+    local total=0
+    local fixed=0
+    
+    # Categorías a procesar
+    local categories=("system" "apps" "packages" "themes" "dev" "webapps" "utils")
+    
+    for category in "${categories[@]}"; do
+        if [ -d "$MATEOS_PATH/bin/$category" ]; then
+            echo "📁 Procesando categoría: $category"
+            
+            for script in "$MATEOS_PATH/bin/$category"/mateos-*; do
+                if [ -f "$script" ]; then
+                    total=$((total + 1))
+                    
+                    # Verificar si ya tiene las variables
+                    if grep -q "mateos-vars.sh" "$script"; then
+                        echo "⏭️  Ya tiene variables: $(basename "$script")"
+                    else
+                        fix_command_env "$script"
+                        fixed=$((fixed + 1))
+                    fi
+                fi
+            done
+        fi
+    done
+    
+    echo ""
+    echo "📊 Resumen:"
+    echo "  Total de comandos: $total"
+    echo "  Comandos actualizados: $fixed"
+    echo "  Ya tenían variables: $((total - fixed))"
+}
+
+# Función para restaurar desde backup
+restore_from_backup() {
+    echo "🔄 Restaurando desde backups..."
+    
+    local restored=0
+    
+    for category in system apps packages themes dev webapps utils; do
+        if [ -d "$MATEOS_PATH/bin/$category" ]; then
+            for script in "$MATEOS_PATH/bin/$category"/mateos-*; do
+                if [ -f "$script" ] && [ -f "$script.backup" ]; then
+                    mv "$script.backup" "$script"
+                    restored=$((restored + 1))
+                    echo "✅ Restaurado: $(basename "$script")"
+                fi
+            done
+        fi
+    done
+    
+    echo "📊 Comandos restaurados: $restored"
+}
+
+# Función para limpiar backups
+clean_backups() {
+    echo "🧹 Limpiando archivos de backup..."
+    
+    local cleaned=0
+    
+    for category in system apps packages themes dev webapps utils; do
+        if [ -d "$MATEOS_PATH/bin/$category" ]; then
+            for backup in "$MATEOS_PATH/bin/$category"/*.backup; do
+                if [ -f "$backup" ]; then
+                    rm "$backup"
+                    cleaned=$((cleaned + 1))
+                fi
+            done
+        fi
+    done
+    
+    echo "📊 Archivos de backup eliminados: $cleaned"
+}
+
+# Función para mostrar ayuda
+show_help() {
+    echo "🔧 MateOS Environment Fixer"
+    echo ""
+    echo "Uso: mateos-fix-env <comando>"
+    echo ""
+    echo "Comandos:"
+    echo "  all                     - Aplicar variables a todos los comandos"
+    echo "  command <ruta>          - Aplicar variables a un comando específico"
+    echo "  restore                 - Restaurar desde backups"
+    echo "  clean                   - Limpiar archivos de backup"
+    echo "  help                    - Mostrar esta ayuda"
+    echo ""
+    echo "Ejemplos:"
+    echo "  mateos-fix-env all"
+    echo "  mateos-fix-env command /path/to/script"
+    echo "  mateos-fix-env restore"
+    echo "  mateos-fix-env clean"
+}
+
+# Función principal
+case "$1" in
+    "all")
+        fix_all_commands
+        ;;
+    "command")
+        if [ -z "$2" ]; then
+            echo "❌ Se requiere ruta del comando"
+            exit 1
+        fi
+        fix_command_env "$2"
+        ;;
+    "restore")
+        restore_from_backup
+        ;;
+    "clean")
+        clean_backups
+        ;;
+    "help"|"-h"|"--help")
+        show_help
+        ;;
+    *)
+        echo "❌ Comando desconocido: $1"
+        show_help
+        exit 1
+        ;;
+esac

@@ -1,0 +1,72 @@
+#!/bin/bash
+
+# Cargar variables de entorno centralizadas
+MATEOS_PATH="${MATEOS_PATH:-$HOME/.local/share/mateOS}"
+if [ -f "$MATEOS_PATH/config/mateos-vars.sh" ]; then
+    source "$MATEOS_PATH/config/mateos-vars.sh"
+fi
+
+# =============================================================================
+# AYUDA DEL COMANDO
+# =============================================================================
+
+# Uso: mateos-cmd-screenrecord [argumentos]
+# Descripción: [DESCRIPCIÓN DEL COMANDO]
+# 
+# Comandos:
+#   [comando1]    - [descripción del comando1]
+#   [comando2]    - [descripción del comando2]
+# 
+# Ejemplos:
+#   mateos-cmd-screenrecord [ejemplo1]
+#   mateos-cmd-screenrecord [ejemplo2]
+# 
+# Variables de entorno:
+#   MATEOS_PATH: $MATEOS_PATH
+#   HOME: $HOME
+#   USER: $USER
+
+# =============================================================================
+# FUNCIONES PRINCIPALES
+# =============================================================================
+
+# Función para mostrar ayuda
+show_help() {
+    echo "🔧 mateos-cmd-screenrecord"
+    echo ""
+    echo "Uso: mateos-cmd-screenrecord [argumentos]"
+    echo ""
+    echo "Descripción: [DESCRIPCIÓN DEL COMANDO]"
+    echo ""
+    echo "Comandos:"
+    echo "  [comando1]    - [descripción del comando1]"
+    echo "  [comando2]    - [descripción del comando2]"
+    echo ""
+    echo "Ejemplos:"
+    echo "  mateos-cmd-screenrecord [ejemplo1]"
+    echo "  mateos-cmd-screenrecord [ejemplo2]"
+    echo ""
+    echo "Variables de entorno:"
+    echo "  MATEOS_PATH: $MATEOS_PATH"
+    echo "  HOME: $HOME"
+    echo "  USER: $USER"
+}
+
+# Función principal
+main() {
+    case "$1" in
+        "help"|"-h"|"--help")
+            show_help
+            ;;
+        "")
+            show_help
+            ;;
+        *)
+            # Aquí va la lógica principal del comando
+            echo "Ejecutando: mateos-cmd-screenrecord con argumentos: ${@:1}"
+            ;;
+    esac
+}
+
+# Ejecutar función principal
+main "$@"
