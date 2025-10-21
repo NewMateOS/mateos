@@ -1,0 +1,494 @@
+#!/bin/bash
+
+# MateOS CI/CD System
+# Sistema de integración continua básico para MateOS
+
+MATEOS_PATH="${MATEOS_PATH:-$HOME/.local/share/mateOS}"
+CI_DIR="$HOME/.config/mateOS/ci"
+CI_LOG="$HOME/.local/state/mateOS/logs/ci.log"
+CI_CONFIG="$HOME/.config/mateOS/ci.conf"
+
+# Crear directorios necesarios
+mkdir -p "$CI_DIR" "$(dirname "$CI_LOG")" "$(dirname "$CI_CONFIG")"
+
+# Función para logging de CI
+ci_log() {
+    local message="$1"
+    local timestamp=$(date '+%Y-%m-%d %H:%M:%S')
+    echo "[$timestamp] $message" >> "$CI_LOG"
+}
+
+# Función para ejecutar pipeline
+run_pipeline() {
+    local pipeline_name="$1"
+    local stage="${2:-all}"
+    
+    if [ -z "$pipeline_name" ]; then
+        echo "❌ Error: Debes especificar un nombre de pipeline"
+        return 1
+    fi
+    
+    echo "🔄 Ejecutando pipeline: $pipeline_name"
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    
+    ci_log "Pipeline started: $pipeline_name, stage: $stage"
+    
+    local pipeline_result=0
+    
+    case "$pipeline_name" in
+        "test")
+            run_test_pipeline "$stage"
+            pipeline_result=$?
+            ;;
+        "build")
+            run_build_pipeline "$stage"
+            pipeline_result=$?
+            ;;
+        "deploy")
+            run_deploy_pipeline "$stage"
+            pipeline_result=$?
+            ;;
+        "full")
+            run_full_pipeline "$stage"
+            pipeline_result=$?
+            ;;
+        *)
+            echo "❌ Error: Pipeline desconocido: $pipeline_name"
+            echo "Pipelines disponibles: test, build, deploy, full"
+            return 1
+            ;;
+    esac
+    
+    if [ $pipeline_result -eq 0 ]; then
+        echo ""
+        echo "✅ Pipeline completado exitosamente: $pipeline_name"
+        ci_log "Pipeline completed: $pipeline_name, result: SUCCESS"
+    else
+        echo ""
+        echo "❌ Pipeline falló: $pipeline_name"
+        ci_log "Pipeline failed: $pipeline_name, result: FAILURE"
+    fi
+    
+    return $pipeline_result
+}
+
+# Función para pipeline de tests
+run_test_pipeline() {
+    local stage="$1"
+    
+    echo "🧪 Ejecutando pipeline de tests..."
+    echo ""
+    
+    # Stage 1: Linting
+    if [ "$stage" = "all" ] || [ "$stage" = "lint" ]; then
+        echo "1️⃣  Linting scripts..."
+        if mateos-lint check; then
+            echo "   ✅ Linting completado"
+        else
+            echo "   ❌ Linting falló"
+            return 1
+        fi
+    fi
+    
+    # Stage 2: Unit Tests
+    if [ "$stage" = "all" ] || [ "$stage" = "unit" ]; then
+        echo "2️⃣  Ejecutando unit tests..."
+        if mateos-test suite unit; then
+            echo "   ✅ Unit tests pasaron"
+        else
+            echo "   ❌ Unit tests fallaron"
+            return 1
+        fi
+    fi
+    
+    # Stage 3: Integration Tests
+    if [ "$stage" = "all" ] || [ "$stage" = "integration" ]; then
+        echo "3️⃣  Ejecutando integration tests..."
+        if mateos-test suite integration; then
+            echo "   ✅ Integration tests pasaron"
+        else
+            echo "   ❌ Integration tests fallaron"
+            return 1
+        fi
+    fi
+    
+    # Stage 4: Config Tests
+    if [ "$stage" = "all" ] || [ "$stage" = "config" ]; then
+        echo "4️⃣  Ejecutando config tests..."
+        if mateos-test suite config; then
+            echo "   ✅ Config tests pasaron"
+        else
+            echo "   ❌ Config tests fallaron"
+            return 1
+        fi
+    fi
+    
+    echo "✅ Pipeline de tests completado"
+    return 0
+}
+
+# Función para pipeline de build
+run_build_pipeline() {
+    local stage="$1"
+    
+    echo "🔨 Ejecutando pipeline de build..."
+    echo ""
+    
+    # Stage 1: Validate Dependencies
+    if [ "$stage" = "all" ] || [ "$stage" = "deps" ]; then
+        echo "1️⃣  Validando dependencias..."
+        if mateos-deps-install check; then
+            echo "   ✅ Dependencias validadas"
+        else
+            echo "   ❌ Dependencias faltantes"
+            return 1
+        fi
+    fi
+    
+    # Stage 2: Validate Configuration
+    if [ "$stage" = "all" ] || [ "$stage" = "config" ]; then
+        echo "2️⃣  Validando configuración..."
+        if mateos-config validate; then
+            echo "   ✅ Configuración validada"
+        else
+            echo "   ❌ Configuración inválida"
+            return 1
+        fi
+    fi
+    
+    # Stage 3: Generate Checksums
+    if [ "$stage" = "all" ] || [ "$stage" = "checksums" ]; then
+        echo "3️⃣  Generando checksums..."
+        if mateos-integrity generate; then
+            echo "   ✅ Checksums generados"
+        else
+            echo "   ❌ Error generando checksums"
+            return 1
+        fi
+    fi
+    
+    # Stage 4: Create Package
+    if [ "$stage" = "all" ] || [ "$stage" = "package" ]; then
+        echo "4️⃣  Creando paquete..."
+        if create_package; then
+            echo "   ✅ Paquete creado"
+        else
+            echo "   ❌ Error creando paquete"
+            return 1
+        fi
+    fi
+    
+    echo "✅ Pipeline de build completado"
+    return 0
+}
+
+# Función para pipeline de deploy
+run_deploy_pipeline() {
+    local stage="$1"
+    
+    echo "🚀 Ejecutando pipeline de deploy..."
+    echo ""
+    
+    # Stage 1: Backup Current
+    if [ "$stage" = "all" ] || [ "$stage" = "backup" ]; then
+        echo "1️⃣  Creando respaldo..."
+        if mateos-backup-auto create; then
+            echo "   ✅ Respaldo creado"
+        else
+            echo "   ❌ Error creando respaldo"
+            return 1
+        fi
+    fi
+    
+    # Stage 2: Deploy Configuration
+    if [ "$stage" = "all" ] || [ "$stage" = "config" ]; then
+        echo "2️⃣  Desplegando configuración..."
+        if mateos-apply-config; then
+            echo "   ✅ Configuración desplegada"
+        else
+            echo "   ❌ Error desplegando configuración"
+            return 1
+        fi
+    fi
+    
+    # Stage 3: Update Scripts
+    if [ "$stage" = "all" ] || [ "$stage" = "scripts" ]; then
+        echo "3️⃣  Actualizando scripts..."
+        if mateos-auto-update apply scripts; then
+            echo "   ✅ Scripts actualizados"
+        else
+            echo "   ❌ Error actualizando scripts"
+            return 1
+        fi
+    fi
+    
+    # Stage 4: Verify Deployment
+    if [ "$stage" = "all" ] || [ "$stage" = "verify" ]; then
+        echo "4️⃣  Verificando despliegue..."
+        if mateos-verify; then
+            echo "   ✅ Despliegue verificado"
+        else
+            echo "   ❌ Error verificando despliegue"
+            return 1
+        fi
+    fi
+    
+    echo "✅ Pipeline de deploy completado"
+    return 0
+}
+
+# Función para pipeline completo
+run_full_pipeline() {
+    local stage="$1"
+    
+    echo "🔄 Ejecutando pipeline completo..."
+    echo ""
+    
+    # Ejecutar todos los pipelines en secuencia
+    if [ "$stage" = "all" ] || [ "$stage" = "test" ]; then
+        if ! run_test_pipeline "all"; then
+            echo "❌ Pipeline de tests falló"
+            return 1
+        fi
+    fi
+    
+    if [ "$stage" = "all" ] || [ "$stage" = "build" ]; then
+        if ! run_build_pipeline "all"; then
+            echo "❌ Pipeline de build falló"
+            return 1
+        fi
+    fi
+    
+    if [ "$stage" = "all" ] || [ "$stage" = "deploy" ]; then
+        if ! run_deploy_pipeline "all"; then
+            echo "❌ Pipeline de deploy falló"
+            return 1
+        fi
+    fi
+    
+    echo "✅ Pipeline completo finalizado"
+    return 0
+}
+
+# Función para crear paquete
+create_package() {
+    local package_name="mateOS-$(date +%Y%m%d-%H%M%S)"
+    local package_dir="$CI_DIR/packages/$package_name"
+    
+    mkdir -p "$package_dir"
+    
+    # Copiar archivos necesarios
+    cp -r "$MATEOS_PATH/config" "$package_dir/"
+    cp -r "$MATEOS_PATH/bin" "$package_dir/"
+    cp -r "$MATEOS_PATH/default" "$package_dir/"
+    cp "$MATEOS_PATH/version" "$package_dir/"
+    cp "$MATEOS_PATH/README.md" "$package_dir/"
+    cp "$MATEOS_PATH/SETUP.md" "$package_dir/"
+    
+    # Crear archivo de instalación
+    cat > "$package_dir/install.sh" << EOF
+#!/bin/bash
+# MateOS Package Installer
+# Instalador de paquete de MateOS
+
+echo "📦 Instalando MateOS package: $package_name"
+echo ""
+
+# Crear directorios
+mkdir -p "\$HOME/.local/share/mateOS"
+mkdir -p "\$HOME/.config/mateOS"
+
+# Copiar archivos
+cp -r config/* "\$HOME/.local/share/mateOS/config/"
+cp -r bin/* "\$HOME/.local/share/mateOS/bin/"
+cp -r default/* "\$HOME/.local/share/mateOS/default/"
+cp version "\$HOME/.local/share/mateOS/"
+cp README.md "\$HOME/.local/share/mateOS/"
+cp SETUP.md "\$HOME/.local/share/mateOS/"
+
+# Hacer scripts ejecutables
+chmod +x "\$HOME/.local/share/mateOS/bin"/*
+
+echo "✅ Paquete instalado exitosamente"
+EOF
+    
+    chmod +x "$package_dir/install.sh"
+    
+    # Crear tarball
+    cd "$CI_DIR/packages"
+    tar -czf "${package_name}.tar.gz" "$package_name"
+    
+    echo "📦 Paquete creado: $package_dir"
+    echo "📦 Tarball: $CI_DIR/packages/${package_name}.tar.gz"
+    
+    return 0
+}
+
+# Función para configurar CI
+configure_ci() {
+    local auto_run="$1"
+    local notification="$2"
+    local schedule="$3"
+    
+    if [ -z "$auto_run" ]; then
+        echo "📋 Configuración actual de CI:"
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        
+        if [ -f "$CI_CONFIG" ]; then
+            cat "$CI_CONFIG"
+        else
+            echo "No hay configuración de CI"
+        fi
+        return
+    fi
+    
+    # Crear archivo de configuración
+    cat > "$CI_CONFIG" << EOF
+# MateOS CI/CD Configuration
+# Configuración de integración continua de MateOS
+
+[general]
+auto_run = $auto_run
+notification = ${notification:-false}
+schedule = ${schedule:-daily}
+
+[pipelines]
+test_pipeline = true
+build_pipeline = true
+deploy_pipeline = false
+full_pipeline = false
+
+[stages]
+lint = true
+unit_tests = true
+integration_tests = true
+config_tests = true
+deps_validation = true
+config_validation = true
+checksums = true
+package = true
+backup = true
+deploy = true
+verify = true
+
+[notifications]
+email = false
+console = true
+log_file = true
+EOF
+    
+    ci_log "CI configured: auto_run=$auto_run, notification=${notification:-false}, schedule=${schedule:-daily}"
+    
+    echo "✅ Configuración de CI actualizada"
+}
+
+# Función para programar CI
+schedule_ci() {
+    local frequency="$1"
+    local time="$2"
+    local pipeline="$3"
+    
+    if [ -z "$frequency" ]; then
+        echo "❌ Error: Debes especificar una frecuencia"
+        echo "Frecuencias disponibles: daily, weekly, monthly"
+        return 1
+    fi
+    
+    if [ -z "$time" ]; then
+        time="03:00"
+    fi
+    
+    if [ -z "$pipeline" ]; then
+        pipeline="test"
+    fi
+    
+    echo "⏰ Programando CI:"
+    echo "  Frecuencia: $frequency"
+    echo "  Hora: $time"
+    echo "  Pipeline: $pipeline"
+    
+    # Crear script de CI programado
+    cat > "$HOME/.local/bin/mateos-scheduled-ci" << EOF
+#!/bin/bash
+# Script de CI programado de MateOS
+# Generado automáticamente el $(date)
+
+export MATEOS_PATH="$MATEOS_PATH"
+
+# Ejecutar pipeline
+"$MATEOS_PATH/bin/mateos-ci" run "$pipeline"
+EOF
+    
+    chmod +x "$HOME/.local/bin/mateos-scheduled-ci"
+    
+    # Crear entrada de cron
+    local cron_entry=""
+    case "$frequency" in
+        "daily")
+            cron_entry="0 $(echo $time | cut -d: -f1) $(echo $time | cut -d: -f2) * * * $HOME/.local/bin/mateos-scheduled-ci"
+            ;;
+        "weekly")
+            cron_entry="0 $(echo $time | cut -d: -f1) $(echo $time | cut -d: -f2) * * 0 $HOME/.local/bin/mateos-scheduled-ci"
+            ;;
+        "monthly")
+            cron_entry="0 $(echo $time | cut -d: -f1) $(echo $time | cut -d: -f2) 1 * * $HOME/.local/bin/mateos-scheduled-ci"
+            ;;
+    esac
+    
+    # Añadir a crontab
+    (crontab -l 2>/dev/null; echo "$cron_entry") | crontab -
+    
+    ci_log "CI scheduled: $frequency at $time for $pipeline"
+    
+    echo "✅ CI programado exitosamente"
+}
+
+# Función para mostrar historial
+show_history() {
+    local lines="${1:-50}"
+    
+    echo "📋 Historial de CI (últimas $lines líneas):"
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    
+    if [ -f "$CI_LOG" ]; then
+        tail -n "$lines" "$CI_LOG"
+    else
+        echo "No hay historial de CI"
+    fi
+}
+
+# Función principal
+case "$1" in
+    "run")
+        run_pipeline "$2" "$3"
+        ;;
+    "configure")
+        configure_ci "$2" "$3" "$4"
+        ;;
+    "schedule")
+        schedule_ci "$2" "$3" "$4"
+        ;;
+    "history")
+        show_history "$2"
+        ;;
+    *)
+        echo "🔄 MateOS CI/CD System"
+        echo ""
+        echo "Uso: mateos-ci <comando> [argumentos]"
+        echo ""
+        echo "Comandos:"
+        echo "  run <pipeline> [stage]          - Ejecutar pipeline"
+        echo "  configure <auto_run> [notification] [schedule] - Configurar CI"
+        echo "  schedule <frecuencia> [hora] [pipeline] - Programar CI"
+        echo "  history [líneas]                - Mostrar historial"
+        echo ""
+        echo "Pipelines disponibles: test, build, deploy, full"
+        echo "Frecuencias: daily, weekly, monthly"
+        echo ""
+        echo "Ejemplos:"
+        echo "  mateos-ci run test"
+        echo "  mateos-ci run build all"
+        echo "  mateos-ci configure true false daily"
+        echo "  mateos-ci schedule daily 03:00 test"
+        ;;
+esac

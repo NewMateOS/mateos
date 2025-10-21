@@ -1,0 +1,481 @@
+#!/bin/bash
+
+# MateOS Documentation System
+# Sistema de documentación automática de MateOS
+
+MATEOS_PATH="${MATEOS_PATH:-$HOME/.local/share/mateOS}"
+DOCS_DIR="$HOME/.config/mateOS/docs"
+DOCS_OUTPUT="$HOME/.config/mateOS/docs/output"
+DOCS_CONFIG="$HOME/.config/mateOS/docs.conf"
+
+# Crear directorios necesarios
+mkdir -p "$DOCS_DIR" "$DOCS_OUTPUT" "$(dirname "$DOCS_CONFIG")"
+
+# Función para generar documentación de scripts
+generate_script_docs() {
+    local script_dir="$1"
+    local output_file="$2"
+    
+    if [ -z "$script_dir" ]; then
+        script_dir="$MATEOS_PATH/bin"
+    fi
+    
+    if [ -z "$output_file" ]; then
+        output_file="$DOCS_OUTPUT/scripts.md"
+    fi
+    
+    echo "📝 Generando documentación de scripts..."
+    echo ""
+    
+    {
+        echo "# MateOS Scripts Documentation"
+        echo "=============================="
+        echo ""
+        echo "Generated: $(date)"
+        echo "Script Directory: $script_dir"
+        echo ""
+        
+        # Encontrar todos los scripts
+        find "$script_dir" -name "*.sh" -o -name "mateos-*" | while read script_file; do
+            if [ -f "$script_file" ]; then
+                local script_name=$(basename "$script_file")
+                echo "## $script_name"
+                echo ""
+                
+                # Extraer comentarios de encabezado
+                head -20 "$script_file" | grep "^#" | while read comment; do
+                    if [[ $comment =~ ^#\ [A-Z] ]]; then
+                        echo "${comment#*# }"
+                    fi
+                done
+                echo ""
+                
+                # Extraer descripción del script
+                local description=$(grep "^# " "$script_file" | head -1 | sed 's/^# //')
+                if [ -n "$description" ]; then
+                    echo "**Descripción:** $description"
+                    echo ""
+                fi
+                
+                # Extraer uso del script
+                echo "**Uso:**"
+                echo '```bash'
+                grep -A 20 "case.*in" "$script_file" | grep "echo.*Uso:" | head -1 | sed 's/.*echo "//' | sed 's/".*//'
+                echo '```'
+                echo ""
+                
+                # Extraer ejemplos
+                echo "**Ejemplos:**"
+                echo '```bash'
+                grep -A 10 "Ejemplos:" "$script_file" | grep "echo" | sed 's/.*echo "//' | sed 's/".*//' | head -5
+                echo '```'
+                echo ""
+                
+                echo "---"
+                echo ""
+            fi
+        done
+        
+    } > "$output_file"
+    
+    echo "✅ Documentación de scripts generada: $output_file"
+}
+
+# Función para generar documentación de configuración
+generate_config_docs() {
+    local config_file="$1"
+    local output_file="$2"
+    
+    if [ -z "$config_file" ]; then
+        config_file="$MATEOS_PATH/config/mateos.conf"
+    fi
+    
+    if [ -z "$output_file" ]; then
+        output_file="$DOCS_OUTPUT/configuration.md"
+    fi
+    
+    echo "📝 Generando documentación de configuración..."
+    echo ""
+    
+    {
+        echo "# MateOS Configuration Documentation"
+        echo "==================================="
+        echo ""
+        echo "Generated: $(date)"
+        echo "Configuration File: $config_file"
+        echo ""
+        
+        if [ -f "$config_file" ]; then
+            # Procesar archivo de configuración
+            awk '
+            BEGIN { in_section = 0; section_name = "" }
+            /^\[/ { 
+                if (in_section) {
+                    print ""
+                }
+                section_name = substr($0, 2, length($0)-2)
+                print "## " section_name
+                print ""
+                in_section = 1
+                next
+            }
+            /^#/ { 
+                gsub(/^# /, "", $0)
+                print "**" $0 "**"
+                print ""
+                next
+            }
+            /=/ {
+                key = $1
+                value = substr($0, index($0, "=") + 1)
+                gsub(/^[ \t]+|[ \t]+$/, "", key)
+                gsub(/^[ \t]+|[ \t]+$/, "", value)
+                gsub(/^"|"$/, "", value)
+                print "- **" key "**: " value
+            }
+            ' "$config_file"
+        else
+            echo "No se encontró archivo de configuración"
+        fi
+        
+    } > "$output_file"
+    
+    echo "✅ Documentación de configuración generada: $output_file"
+}
+
+# Función para generar documentación de API
+generate_api_docs() {
+    local output_file="${1:-$DOCS_OUTPUT/api.md}"
+    
+    echo "📝 Generando documentación de API..."
+    echo ""
+    
+    {
+        echo "# MateOS API Documentation"
+        echo "========================="
+        echo ""
+        echo "Generated: $(date)"
+        echo ""
+        
+        echo "## Scripts Disponibles"
+        echo ""
+        
+        # Listar todos los scripts con sus descripciones
+        find "$MATEOS_PATH/bin" -name "mateos-*" -type f | sort | while read script_file; do
+            if [ -f "$script_file" ] && [ -x "$script_file" ]; then
+                local script_name=$(basename "$script_file")
+                local description=$(head -5 "$script_file" | grep "^# " | head -1 | sed 's/^# //')
+                
+                echo "### $script_name"
+                if [ -n "$description" ]; then
+                    echo "$description"
+                fi
+                echo ""
+                
+                # Extraer uso básico
+                local usage=$(grep -A 5 "case.*in" "$script_file" | grep "echo.*Uso:" | head -1 | sed 's/.*echo "//' | sed 's/".*//')
+                if [ -n "$usage" ]; then
+                    echo "**Uso:** \`$usage\`"
+                    echo ""
+                fi
+                
+                echo "---"
+                echo ""
+            fi
+        done
+        
+    } > "$output_file"
+    
+    echo "✅ Documentación de API generada: $output_file"
+}
+
+# Función para generar documentación de temas
+generate_themes_docs() {
+    local themes_dir="$1"
+    local output_file="$2"
+    
+    if [ -z "$themes_dir" ]; then
+        themes_dir="$HOME/.config/mateOS/themes"
+    fi
+    
+    if [ -z "$output_file" ]; then
+        output_file="$DOCS_OUTPUT/themes.md"
+    fi
+    
+    echo "📝 Generando documentación de temas..."
+    echo ""
+    
+    {
+        echo "# MateOS Themes Documentation"
+        echo "============================="
+        echo ""
+        echo "Generated: $(date)"
+        echo "Themes Directory: $themes_dir"
+        echo ""
+        
+        if [ -d "$themes_dir" ]; then
+            find "$themes_dir" -maxdepth 1 -type d | while read theme_dir; do
+                if [ "$theme_dir" != "$themes_dir" ]; then
+                    local theme_name=$(basename "$theme_dir")
+                    echo "## $theme_name"
+                    echo ""
+                    
+                    # Buscar archivo README en el tema
+                    if [ -f "$theme_dir/README.md" ]; then
+                        cat "$theme_dir/README.md"
+                    else
+                        echo "No hay documentación disponible para este tema."
+                    fi
+                    echo ""
+                    echo "---"
+                    echo ""
+                fi
+            done
+        else
+            echo "No hay temas instalados"
+        fi
+        
+    } > "$output_file"
+    
+    echo "✅ Documentación de temas generada: $output_file"
+}
+
+# Función para generar documentación completa
+generate_full_docs() {
+    local output_dir="${1:-$DOCS_OUTPUT}"
+    
+    echo "📝 Generando documentación completa..."
+    echo ""
+    
+    mkdir -p "$output_dir"
+    
+    # Generar documentación de scripts
+    generate_script_docs "$MATEOS_PATH/bin" "$output_dir/scripts.md"
+    
+    # Generar documentación de configuración
+    generate_config_docs "$MATEOS_PATH/config/mateos.conf" "$output_dir/configuration.md"
+    
+    # Generar documentación de API
+    generate_api_docs "$output_dir/api.md"
+    
+    # Generar documentación de temas
+    generate_themes_docs "$HOME/.config/mateOS/themes" "$output_dir/themes.md"
+    
+    # Crear índice principal
+    cat > "$output_dir/README.md" << EOF
+# MateOS Documentation
+====================
+
+Generated: $(date)
+
+## Documentación Disponible
+
+- [Scripts](scripts.md) - Documentación de todos los scripts de MateOS
+- [Configuración](configuration.md) - Documentación de configuración
+- [API](api.md) - Documentación de la API
+- [Temas](themes.md) - Documentación de temas
+
+## Comandos Rápidos
+
+### Configuración
+\`\`\`bash
+mateos-config validate
+mateos-profile list
+mateos-deps-install check
+\`\`\`
+
+### Respaldos
+\`\`\`bash
+mateos-backup-auto create
+mateos-backup-auto schedule daily 02:00
+\`\`\`
+
+### Testing
+\`\`\`bash
+mateos-test suite all
+mateos-ci run test
+\`\`\`
+
+### Logging
+\`\`\`bash
+mateos-log info "Mensaje" system
+mateos-audit report
+\`\`\`
+
+## Enlaces Útiles
+
+- [Repositorio](https://github.com/mateOS/mateOS)
+- [Issues](https://github.com/mateOS/mateOS/issues)
+- [Wiki](https://github.com/mateOS/mateOS/wiki)
+EOF
+    
+    echo "✅ Documentación completa generada en: $output_dir"
+}
+
+# Función para servir documentación
+serve_docs() {
+    local port="${1:-8080}"
+    local output_dir="${2:-$DOCS_OUTPUT}"
+    
+    echo "🌐 Sirviendo documentación en http://localhost:$port"
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    
+    if command -v python3 &>/dev/null; then
+        cd "$output_dir"
+        python3 -m http.server "$port"
+    elif command -v python &>/dev/null; then
+        cd "$output_dir"
+        python -m SimpleHTTPServer "$port"
+    else
+        echo "❌ Error: Python no está disponible para servir documentación"
+        echo "💡 Instala python3 o python para servir documentación"
+        return 1
+    fi
+}
+
+# Función para exportar documentación
+export_docs() {
+    local format="$1"
+    local output_file="$2"
+    
+    if [ -z "$format" ]; then
+        format="html"
+    fi
+    
+    if [ -z "$output_file" ]; then
+        output_file="$DOCS_OUTPUT/mateOS-docs.$format"
+    fi
+    
+    echo "📤 Exportando documentación en formato $format..."
+    echo ""
+    
+    case "$format" in
+        "html")
+            if command -v pandoc &>/dev/null; then
+                pandoc "$DOCS_OUTPUT/README.md" -o "$output_file" --standalone --css=style.css
+                echo "✅ Documentación HTML exportada: $output_file"
+            else
+                echo "❌ Error: Pandoc no está disponible para exportar HTML"
+                echo "💡 Instala pandoc: yay -S pandoc"
+                return 1
+            fi
+            ;;
+        "pdf")
+            if command -v pandoc &>/dev/null; then
+                pandoc "$DOCS_OUTPUT/README.md" -o "$output_file" --pdf-engine=wkhtmltopdf
+                echo "✅ Documentación PDF exportada: $output_file"
+            else
+                echo "❌ Error: Pandoc no está disponible para exportar PDF"
+                return 1
+            fi
+            ;;
+        "txt")
+            cp "$DOCS_OUTPUT/README.md" "$output_file"
+            echo "✅ Documentación TXT exportada: $output_file"
+            ;;
+        *)
+            echo "❌ Error: Formato no soportado: $format"
+            echo "Formatos disponibles: html, pdf, txt"
+            return 1
+            ;;
+    esac
+}
+
+# Función para configurar documentación
+configure_docs() {
+    local auto_generate="$1"
+    local output_format="$2"
+    local serve_port="$3"
+    
+    if [ -z "$auto_generate" ]; then
+        echo "📋 Configuración actual de documentación:"
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        
+        if [ -f "$DOCS_CONFIG" ]; then
+            cat "$DOCS_CONFIG"
+        else
+            echo "No hay configuración de documentación"
+        fi
+        return
+    fi
+    
+    # Crear archivo de configuración
+    cat > "$DOCS_CONFIG" << EOF
+# MateOS Documentation Configuration
+# Configuración de documentación de MateOS
+
+[general]
+auto_generate = $auto_generate
+output_format = ${output_format:-html}
+serve_port = ${serve_port:-8080}
+
+[sections]
+scripts = true
+configuration = true
+api = true
+themes = true
+examples = true
+
+[output]
+directory = $DOCS_OUTPUT
+index_file = README.md
+style_css = style.css
+
+[export]
+formats = html,pdf,txt
+default_format = html
+EOF
+    
+    echo "✅ Configuración de documentación actualizada"
+}
+
+# Función principal
+case "$1" in
+    "scripts")
+        generate_script_docs "$2" "$3"
+        ;;
+    "config")
+        generate_config_docs "$2" "$3"
+        ;;
+    "api")
+        generate_api_docs "$2"
+        ;;
+    "themes")
+        generate_themes_docs "$2" "$3"
+        ;;
+    "full"|"all")
+        generate_full_docs "$2"
+        ;;
+    "serve")
+        serve_docs "$2" "$3"
+        ;;
+    "export")
+        export_docs "$2" "$3"
+        ;;
+    "configure")
+        configure_docs "$2" "$3" "$4"
+        ;;
+    *)
+        echo "📚 MateOS Documentation System"
+        echo ""
+        echo "Uso: mateos-docs <comando> [argumentos]"
+        echo ""
+        echo "Comandos:"
+        echo "  scripts [directorio] [archivo]    - Generar documentación de scripts"
+        echo "  config [archivo] [archivo]       - Generar documentación de configuración"
+        echo "  api [archivo]                     - Generar documentación de API"
+        echo "  themes [directorio] [archivo]     - Generar documentación de temas"
+        echo "  full [directorio]                 - Generar documentación completa"
+        echo "  serve [puerto] [directorio]       - Servir documentación"
+        echo "  export [formato] [archivo]        - Exportar documentación"
+        echo "  configure [auto_generate] [formato] [puerto] - Configurar documentación"
+        echo ""
+        echo "Formatos de exportación: html, pdf, txt"
+        echo ""
+        echo "Ejemplos:"
+        echo "  mateos-docs full"
+        echo "  mateos-docs serve 8080"
+        echo "  mateos-docs export html"
+        echo "  mateos-docs configure true html 8080"
+        ;;
+esac

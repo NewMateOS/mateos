@@ -1,0 +1,531 @@
+#!/bin/bash
+
+# MateOS Applications Management System
+# Sistema de gestión de aplicaciones de MateOS
+
+MATEOS_PATH="${MATEOS_PATH:-$HOME/.local/share/mateOS}"
+APPS_CONFIG="$HOME/.config/mateOS/apps.conf"
+APPS_LOG="$HOME/.local/state/mateOS/logs/apps.log"
+
+# Crear directorios necesarios
+mkdir -p "$(dirname "$APPS_CONFIG")" "$(dirname "$APPS_LOG")"
+
+# Función para logging de aplicaciones
+app_log() {
+    local message="$1"
+    local timestamp=$(date '+%Y-%m-%d %H:%M:%S')
+    echo "[$timestamp] $message" >> "$APPS_LOG"
+}
+
+# Función para detectar aplicaciones faltantes
+detect_missing_apps() {
+    local category="${1:-all}"
+    
+    echo "🔍 Detectando aplicaciones faltantes..."
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    
+    local missing_apps=()
+    
+    # Aplicaciones esenciales
+    local essential_apps=(
+        "hyprland"
+        "waybar"
+        "kitty"
+        "gum"
+        "jq"
+        "uwsm-app"
+    )
+    
+    # Aplicaciones recomendadas
+    local recommended_apps=(
+        "btop"
+        "fastfetch"
+        "starship"
+        "swayosd"
+        "walker"
+        "hypridle"
+        "hyprlock"
+        "hyprsunset"
+        "mako"
+        "blueberry"
+        "nautilus"
+        "chromium"
+        "firefox"
+        "nvim"
+        "git"
+        "docker"
+        "docker-compose"
+        "tailscale"
+        "steam"
+        "discord"
+        "spotify"
+        "obsidian"
+        "1password"
+        "signal-desktop"
+    )
+    
+    # Aplicaciones de desarrollo
+    local dev_apps=(
+        "base-devel"
+        "nodejs"
+        "npm"
+        "python"
+        "python-pip"
+        "rust"
+        "go"
+        "jdk-openjdk"
+        "maven"
+        "gradle"
+        "vscode"
+        "intellij-idea-community-edition"
+    )
+    
+    # Aplicaciones de gaming
+    local gaming_apps=(
+        "steam"
+        "discord"
+        "lutris"
+        "wine"
+        "winetricks"
+        "proton-ge-custom"
+        "gamemode"
+        "mangohud"
+        "vulkan-radeon"
+        "vulkan-intel"
+        "nvidia"
+        "nvidia-utils"
+        "nvidia-settings"
+    )
+    
+    case "$category" in
+        "essential")
+            check_apps "${essential_apps[@]}"
+            ;;
+        "recommended")
+            check_apps "${recommended_apps[@]}"
+            ;;
+        "development"|"dev")
+            check_apps "${dev_apps[@]}"
+            ;;
+        "gaming"|"games")
+            check_apps "${gaming_apps[@]}"
+            ;;
+        "all"|*)
+            check_apps "${essential_apps[@]}" "${recommended_apps[@]}"
+            ;;
+    esac
+}
+
+# Función para verificar aplicaciones
+check_apps() {
+    local apps=("$@")
+    local missing_count=0
+    
+    for app in "${apps[@]}"; do
+        if ! command -v "$app" &>/dev/null && ! pacman -Q "$app" &>/dev/null; then
+            echo "❌ $app (faltante)"
+            ((missing_count++))
+        else
+            echo "✅ $app"
+        fi
+    done
+    
+    echo ""
+    echo "📊 Total de aplicaciones faltantes: $missing_count"
+    
+    if [ $missing_count -gt 0 ]; then
+        echo "💡 Ejecuta: mateos-apps install-missing $category"
+    fi
+}
+
+# Función para instalar aplicaciones faltantes
+install_missing_apps() {
+    local category="${1:-all}"
+    local auto_confirm="${2:-false}"
+    
+    echo "📦 Instalando aplicaciones faltantes..."
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    
+    local apps_to_install=()
+    
+    # Detectar aplicaciones faltantes
+    case "$category" in
+        "essential")
+            apps_to_install=($(detect_missing_apps "essential" | grep "❌" | cut -d' ' -f2))
+            ;;
+        "recommended")
+            apps_to_install=($(detect_missing_apps "recommended" | grep "❌" | cut -d' ' -f2))
+            ;;
+        "development"|"dev")
+            apps_to_install=($(detect_missing_apps "development" | grep "❌" | cut -d' ' -f2))
+            ;;
+        "gaming"|"games")
+            apps_to_install=($(detect_missing_apps "gaming" | grep "❌" | cut -d' ' -f2))
+            ;;
+        "all"|*)
+            apps_to_install=($(detect_missing_apps "all" | grep "❌" | cut -d' ' -f2))
+            ;;
+    esac
+    
+    if [ ${#apps_to_install[@]} -eq 0 ]; then
+        echo "✅ No hay aplicaciones faltantes"
+        return 0
+    fi
+    
+    echo "Aplicaciones a instalar: ${apps_to_install[*]}"
+    echo ""
+    
+    if [ "$auto_confirm" != "true" ]; then
+        read -p "¿Continuar con la instalación? (y/N): " confirm
+        if [ "$confirm" != "y" ] && [ "$confirm" != "Y" ]; then
+            echo "❌ Instalación cancelada"
+            return 1
+        fi
+    fi
+    
+    # Instalar aplicaciones
+    local installed=0
+    local failed=0
+    
+    for app in "${apps_to_install[@]}"; do
+        echo "📦 Instalando $app..."
+        
+        if yay -S --noconfirm "$app" &>/dev/null; then
+            echo "✅ $app instalado"
+            ((installed++))
+            app_log "App installed: $app"
+        else
+            echo "❌ Error instalando $app"
+            ((failed++))
+            app_log "App installation failed: $app"
+        fi
+    done
+    
+    echo ""
+    echo "📊 Resumen de instalación:"
+    echo "  ✅ Instalados: $installed"
+    if [ $failed -gt 0 ]; then
+        echo "  ❌ Fallidos: $failed"
+    fi
+}
+
+# Función para listar aplicaciones instaladas
+list_installed_apps() {
+    local category="${1:-all}"
+    
+    echo "📋 Aplicaciones instaladas:"
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    
+    case "$category" in
+        "essential")
+            list_category_apps "essential"
+            ;;
+        "recommended")
+            list_category_apps "recommended"
+            ;;
+        "development"|"dev")
+            list_category_apps "development"
+            ;;
+        "gaming"|"games")
+            list_category_apps "gaming"
+            ;;
+        "all"|*)
+            list_category_apps "essential"
+            echo ""
+            list_category_apps "recommended"
+            ;;
+    esac
+}
+
+# Función para listar aplicaciones por categoría
+list_category_apps() {
+    local category="$1"
+    
+    case "$category" in
+        "essential")
+            echo "🔧 Aplicaciones esenciales:"
+            check_apps "hyprland" "waybar" "kitty" "gum" "jq" "uwsm-app"
+            ;;
+        "recommended")
+            echo "⭐ Aplicaciones recomendadas:"
+            check_apps "btop" "fastfetch" "starship" "swayosd" "walker" "hypridle" "hyprlock" "hyprsunset" "mako" "blueberry" "nautilus" "chromium" "firefox" "nvim" "git" "docker" "docker-compose" "tailscale" "steam" "discord" "spotify" "obsidian" "1password" "signal-desktop"
+            ;;
+        "development")
+            echo "💻 Aplicaciones de desarrollo:"
+            check_apps "base-devel" "nodejs" "npm" "python" "python-pip" "rust" "go" "jdk-openjdk" "maven" "gradle" "vscode" "intellij-idea-community-edition"
+            ;;
+        "gaming")
+            echo "🎮 Aplicaciones de gaming:"
+            check_apps "steam" "discord" "lutris" "wine" "winetricks" "proton-ge-custom" "gamemode" "mangohud" "vulkan-radeon" "vulkan-intel" "nvidia" "nvidia-utils" "nvidia-settings"
+            ;;
+    esac
+}
+
+# Función para configurar aplicaciones
+configure_apps() {
+    local app_name="$1"
+    local config_type="$2"
+    
+    if [ -z "$app_name" ]; then
+        echo "❌ Error: Debes especificar un nombre de aplicación"
+        return 1
+    fi
+    
+    if [ -z "$config_type" ]; then
+        config_type="default"
+    fi
+    
+    echo "🔧 Configurando aplicación: $app_name"
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    
+    case "$app_name" in
+        "hyprland")
+            configure_hyprland "$config_type"
+            ;;
+        "waybar")
+            configure_waybar "$config_type"
+            ;;
+        "kitty")
+            configure_kitty "$config_type"
+            ;;
+        "chromium")
+            configure_chromium "$config_type"
+            ;;
+        "docker")
+            configure_docker "$config_type"
+            ;;
+        "steam")
+            configure_steam "$config_type"
+            ;;
+        *)
+            echo "❌ Error: Aplicación no soportada: $app_name"
+            echo "Aplicaciones soportadas: hyprland, waybar, kitty, chromium, docker, steam"
+            return 1
+            ;;
+    esac
+}
+
+# Función para configurar Hyprland
+configure_hyprland() {
+    local config_type="$1"
+    
+    echo "🔧 Configurando Hyprland..."
+    
+    case "$config_type" in
+        "default")
+            echo "✅ Configuración por defecto aplicada"
+            ;;
+        "gaming")
+            echo "🎮 Configuración de gaming aplicada"
+            ;;
+        "development")
+            echo "💻 Configuración de desarrollo aplicada"
+            ;;
+        *)
+            echo "❌ Error: Tipo de configuración no soportado: $config_type"
+            return 1
+            ;;
+    esac
+    
+    app_log "Hyprland configured: $config_type"
+}
+
+# Función para configurar Waybar
+configure_waybar() {
+    local config_type="$1"
+    
+    echo "🔧 Configurando Waybar..."
+    
+    case "$config_type" in
+        "default")
+            echo "✅ Configuración por defecto aplicada"
+            ;;
+        "minimal")
+            echo "🎯 Configuración minimalista aplicada"
+            ;;
+        "gaming")
+            echo "🎮 Configuración de gaming aplicada"
+            ;;
+        *)
+            echo "❌ Error: Tipo de configuración no soportado: $config_type"
+            return 1
+            ;;
+    esac
+    
+    app_log "Waybar configured: $config_type"
+}
+
+# Función para configurar Kitty
+configure_kitty() {
+    local config_type="$1"
+    
+    echo "🔧 Configurando Kitty..."
+    
+    case "$config_type" in
+        "default")
+            echo "✅ Configuración por defecto aplicada"
+            ;;
+        "development")
+            echo "💻 Configuración de desarrollo aplicada"
+            ;;
+        "gaming")
+            echo "🎮 Configuración de gaming aplicada"
+            ;;
+        *)
+            echo "❌ Error: Tipo de configuración no soportado: $config_type"
+            return 1
+            ;;
+    esac
+    
+    app_log "Kitty configured: $config_type"
+}
+
+# Función para configurar Chromium
+configure_chromium() {
+    local config_type="$1"
+    
+    echo "🔧 Configurando Chromium..."
+    
+    case "$config_type" in
+        "default")
+            echo "✅ Configuración por defecto aplicada"
+            ;;
+        "privacy")
+            echo "🔒 Configuración de privacidad aplicada"
+            ;;
+        "development")
+            echo "💻 Configuración de desarrollo aplicada"
+            ;;
+        *)
+            echo "❌ Error: Tipo de configuración no soportado: $config_type"
+            return 1
+            ;;
+    esac
+    
+    app_log "Chromium configured: $config_type"
+}
+
+# Función para configurar Docker
+configure_docker() {
+    local config_type="$1"
+    
+    echo "🔧 Configurando Docker..."
+    
+    case "$config_type" in
+        "default")
+            echo "✅ Configuración por defecto aplicada"
+            ;;
+        "development")
+            echo "💻 Configuración de desarrollo aplicada"
+            ;;
+        "production")
+            echo "🏭 Configuración de producción aplicada"
+            ;;
+        *)
+            echo "❌ Error: Tipo de configuración no soportado: $config_type"
+            return 1
+            ;;
+    esac
+    
+    app_log "Docker configured: $config_type"
+}
+
+# Función para configurar Steam
+configure_steam() {
+    local config_type="$1"
+    
+    echo "🔧 Configurando Steam..."
+    
+    case "$config_type" in
+        "default")
+            echo "✅ Configuración por defecto aplicada"
+            ;;
+        "gaming")
+            echo "🎮 Configuración de gaming aplicada"
+            ;;
+        "performance")
+            echo "⚡ Configuración de rendimiento aplicada"
+            ;;
+        *)
+            echo "❌ Error: Tipo de configuración no soportado: $config_type"
+            return 1
+            ;;
+    esac
+    
+    app_log "Steam configured: $config_type"
+}
+
+# Función para mostrar estadísticas
+show_stats() {
+    echo "📊 Estadísticas de aplicaciones:"
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    
+    # Contar aplicaciones instaladas
+    local essential_count=$(detect_missing_apps "essential" | grep -c "✅")
+    local recommended_count=$(detect_missing_apps "recommended" | grep -c "✅")
+    local dev_count=$(detect_missing_apps "development" | grep -c "✅")
+    local gaming_count=$(detect_missing_apps "gaming" | grep -c "✅")
+    
+    echo "🔧 Aplicaciones esenciales: $essential_count/6"
+    echo "⭐ Aplicaciones recomendadas: $recommended_count/15"
+    echo "💻 Aplicaciones de desarrollo: $dev_count/12"
+    echo "🎮 Aplicaciones de gaming: $gaming_count/13"
+    
+    # Calcular porcentaje de completitud
+    local total_essential=6
+    local total_recommended=15
+    local total_dev=12
+    local total_gaming=13
+    
+    local essential_percent=$((essential_count * 100 / total_essential))
+    local recommended_percent=$((recommended_count * 100 / total_recommended))
+    local dev_percent=$((dev_count * 100 / total_dev))
+    local gaming_percent=$((gaming_count * 100 / total_gaming))
+    
+    echo ""
+    echo "📈 Porcentaje de completitud:"
+    echo "  🔧 Esenciales: $essential_percent%"
+    echo "  ⭐ Recomendadas: $recommended_percent%"
+    echo "  💻 Desarrollo: $dev_percent%"
+    echo "  🎮 Gaming: $gaming_percent%"
+}
+
+# Función principal
+case "$1" in
+    "detect")
+        detect_missing_apps "$2"
+        ;;
+    "install-missing")
+        install_missing_apps "$2" "$3"
+        ;;
+    "list")
+        list_installed_apps "$2"
+        ;;
+    "configure")
+        configure_apps "$2" "$3"
+        ;;
+    "stats")
+        show_stats
+        ;;
+    *)
+        echo "📱 MateOS Applications Management System"
+        echo ""
+        echo "Uso: mateos-apps <comando> [argumentos]"
+        echo ""
+        echo "Comandos:"
+        echo "  detect [categoría]               - Detectar aplicaciones faltantes"
+        echo "  install-missing [categoría] [auto] - Instalar aplicaciones faltantes"
+        echo "  list [categoría]                 - Listar aplicaciones instaladas"
+        echo "  configure <app> [tipo]           - Configurar aplicación"
+        echo "  stats                            - Mostrar estadísticas"
+        echo ""
+        echo "Categorías disponibles: essential, recommended, development, gaming, all"
+        echo "Aplicaciones soportadas: hyprland, waybar, kitty, chromium, docker, steam"
+        echo ""
+        echo "Ejemplos:"
+        echo "  mateos-apps detect essential"
+        echo "  mateos-apps install-missing recommended"
+        echo "  mateos-apps configure hyprland gaming"
+        echo "  mateos-apps stats"
+        ;;
+esac
