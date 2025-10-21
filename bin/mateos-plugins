@@ -135,7 +135,12 @@ list_plugins() {
     echo "📋 Plugins de MateOS:"
     echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
     
+    # Crear archivo de configuración si no existe
     if [ ! -f "$PLUGINS_CONFIG" ]; then
+        touch "$PLUGINS_CONFIG"
+    fi
+    
+    if [ ! -s "$PLUGINS_CONFIG" ]; then
         echo "No hay plugins instalados"
         return
     fi
@@ -203,7 +208,11 @@ activate_plugin() {
     fi
     
     # Marcar como activo en configuración
-    sed -i "s/^$plugin_name:/$plugin_name:active:/" "$PLUGINS_CONFIG"
+    if [ -f "$PLUGINS_CONFIG" ] && grep -q "^$plugin_name:" "$PLUGINS_CONFIG"; then
+        sed -i "s/^$plugin_name:.*/$plugin_name:active:$(date '+%Y-%m-%d %H:%M:%S')/" "$PLUGINS_CONFIG"
+    else
+        echo "$plugin_name:active:$(date '+%Y-%m-%d %H:%M:%S')" >> "$PLUGINS_CONFIG"
+    fi
     
     plugin_log "Plugin activated: $plugin_name"
     

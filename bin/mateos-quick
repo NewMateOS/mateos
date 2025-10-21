@@ -1,0 +1,180 @@
+#!/bin/bash
+
+# MateOS Quick Commands
+# Comandos rápidos de MateOS
+
+MATEOS_PATH="${MATEOS_PATH:-$HOME/.local/share/mateOS}"
+
+# Función para mostrar ayuda rápida
+show_quick_help() {
+    echo "⚡ MateOS Quick Commands"
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo ""
+    echo "🔧 Sistema:"
+    echo "  mateos-quick status    - Estado del sistema"
+    echo "  mateos-quick health    - Verificación de salud"
+    echo "  mateos-quick optimize  - Optimización rápida"
+    echo ""
+    echo "📊 Monitoreo:"
+    echo "  mateos-quick monitor   - Monitor en tiempo real"
+    echo "  mateos-quick alerts    - Verificar alertas"
+    echo "  mateos-quick logs      - Ver logs recientes"
+    echo ""
+    echo "💾 Respaldo:"
+    echo "  mateos-quick backup    - Crear respaldo rápido"
+    echo "  mateos-quick restore   - Listar respaldos"
+    echo ""
+    echo "🔌 Plugins:"
+    echo "  mateos-quick plugins   - Listar plugins"
+    echo "  mateos-quick install   - Instalar plugin"
+    echo ""
+    echo "📝 Utilidades:"
+    echo "  mateos-quick docs      - Abrir documentación"
+    echo "  mateos-quick config    - Configuración rápida"
+    echo "  mateos-quick test      - Ejecutar tests"
+    echo ""
+}
+
+# Función para estado rápido
+quick_status() {
+    echo "⚡ Estado Rápido de MateOS"
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    mateos-monitor status
+    echo ""
+    mateos-monitor resources
+}
+
+# Función para verificación de salud
+quick_health() {
+    echo "⚡ Verificación de Salud"
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    mateos-alerts full
+}
+
+# Función para optimización rápida
+quick_optimize() {
+    echo "⚡ Optimización Rápida"
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    mateos-optimize stats
+    echo ""
+    echo "💡 Para optimización completa: mateos-optimize full"
+}
+
+# Función para monitor rápido
+quick_monitor() {
+    echo "⚡ Monitor Rápido"
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    mateos-monitor all
+}
+
+# Función para alertas rápidas
+quick_alerts() {
+    echo "⚡ Alertas Rápidas"
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    mateos-alerts history 5
+}
+
+# Función para logs rápidos
+quick_logs() {
+    echo "⚡ Logs Recientes"
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    mateos-log show system 10
+}
+
+# Función para respaldo rápido
+quick_backup() {
+    echo "⚡ Respaldo Rápido"
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    mateos-backup-auto create
+}
+
+# Función para listar respaldos
+quick_restore() {
+    echo "⚡ Respaldos Disponibles"
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    mateos-backup-auto list
+}
+
+# Función para plugins rápidos
+quick_plugins() {
+    echo "⚡ Plugins"
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    mateos-plugins list
+}
+
+# Función para instalar plugin
+quick_install() {
+    echo "⚡ Instalación de Plugin"
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo "💡 Usa: mateos-plugins install <fuente> [nombre]"
+    echo "💡 Ejemplo: mateos-plugins install https://github.com/user/plugin.git"
+}
+
+# Función para documentación
+quick_docs() {
+    echo "⚡ Abriendo Documentación"
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    mateos-docs serve 8080 &
+    echo "🌐 Documentación disponible en: http://localhost:8080"
+    echo "💡 Presiona Ctrl+C para detener el servidor"
+}
+
+# Función para configuración rápida
+quick_config() {
+    echo "⚡ Configuración Rápida"
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    mateos-config show
+}
+
+# Función para tests rápidos
+quick_test() {
+    echo "⚡ Tests Rápidos"
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    mateos-test suite all
+}
+
+# Función principal
+case "$1" in
+    "status")
+        quick_status
+        ;;
+    "health")
+        quick_health
+        ;;
+    "optimize")
+        quick_optimize
+        ;;
+    "monitor")
+        quick_monitor
+        ;;
+    "alerts")
+        quick_alerts
+        ;;
+    "logs")
+        quick_logs
+        ;;
+    "backup")
+        quick_backup
+        ;;
+    "restore")
+        quick_restore
+        ;;
+    "plugins")
+        quick_plugins
+        ;;
+    "install")
+        quick_install
+        ;;
+    "docs")
+        quick_docs
+        ;;
+    "config")
+        quick_config
+        ;;
+    "test")
+        quick_test
+        ;;
+    *)
+        show_quick_help
+        ;;
+esac

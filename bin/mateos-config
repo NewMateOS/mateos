@@ -201,6 +201,64 @@ apply_config() {
         echo "✅ Configuración de Waybar aplicada"
     fi
     
+    # Crear archivo de configuración principal si no existe
+    if [ ! -f "$config_path/mateos.conf" ]; then
+        cp "$MATEOS_PATH/config/mateos.conf" "$config_path/mateos.conf" 2>/dev/null || {
+            echo "⚠️  No se pudo copiar mateos.conf, creando uno básico"
+            cat > "$config_path/mateos.conf" << EOF
+[system]
+version = "1.0.0"
+debug = false
+auto_update = true
+backup_retention_days = 30
+
+[paths]
+mateos_path = "\$HOME/.local/share/mateOS"
+config_path = "\$HOME/.config/mateOS"
+state_path = "\$HOME/.local/state/mateOS"
+backup_path = "\$HOME/.config/mateOS/backups"
+log_path = "\$HOME/.local/state/mateOS/logs"
+
+[applications]
+default_terminal = "kitty"
+default_browser = "firefox"
+default_file_manager = "thunar"
+
+[hyprland]
+gaps_in = 5
+gaps_out = 20
+border_size = 2
+rounding = 10
+
+[waybar]
+height = 30
+position = "top"
+EOF
+        }
+        echo "✅ Archivo de configuración principal creado"
+    fi
+    
+    # Crear archivo de variables de entorno si no existe
+    if [ ! -f "$config_path/mateos.env" ]; then
+        cp "$MATEOS_PATH/config/mateos.env" "$config_path/mateos.env" 2>/dev/null || {
+            echo "⚠️  No se pudo copiar mateos.env, creando uno básico"
+            cat > "$config_path/mateos.env" << EOF
+# MateOS Environment Variables
+# Variables de entorno de MateOS
+
+export MATEOS_PATH="\$HOME/.local/share/mateOS"
+export MATEOS_CONFIG_PATH="\$HOME/.config/mateOS"
+export MATEOS_STATE_PATH="\$HOME/.local/state/mateOS"
+export MATEOS_BACKUP_PATH="\$HOME/.config/mateOS/backups"
+export MATEOS_LOG_PATH="\$HOME/.local/state/mateOS/logs"
+
+# Añadir MateOS al PATH
+export PATH="\$MATEOS_PATH/bin:\$PATH"
+EOF
+        }
+        echo "✅ Archivo de variables de entorno creado"
+    fi
+    
     echo ""
     echo "✅ Configuración aplicada exitosamente"
 }

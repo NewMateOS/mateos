@@ -1,0 +1,475 @@
+#!/bin/bash
+
+# MateOS System Monitor
+# Monitor del sistema MateOS en tiempo real
+
+MATEOS_PATH="${MATEOS_PATH:-$HOME/.local/share/mateOS}"
+MONITOR_LOG="$HOME/.local/state/mateOS/logs/monitor.log"
+MONITOR_CONFIG="$HOME/.config/mateOS/monitor.conf"
+
+# Crear directorios necesarios
+mkdir -p "$(dirname "$MONITOR_LOG")" "$(dirname "$MONITOR_CONFIG")"
+
+# Función para logging de monitor
+monitor_log() {
+    local message="$1"
+    local timestamp=$(date '+%Y-%m-%d %H:%M:%S')
+    echo "[$timestamp] $message" >> "$MONITOR_LOG"
+}
+
+# Función para mostrar estado del sistema
+show_system_status() {
+    echo "📊 Estado del Sistema MateOS"
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    
+    # Estado de MateOS
+    local mateos_status="❌"
+    if [ -d "$MATEOS_PATH" ] && [ -f "$MATEOS_PATH/version" ]; then
+        mateos_status="✅"
+    fi
+    echo "🔧 MateOS: $mateos_status"
+    
+    # Estado de Hyprland
+    local hyprland_status="❌"
+    if command -v hyprland &>/dev/null; then
+        hyprland_status="✅"
+    fi
+    echo "🖥️  Hyprland: $hyprland_status"
+    
+    # Estado de Waybar
+    local waybar_status="❌"
+    if command -v waybar &>/dev/null; then
+        waybar_status="✅"
+    fi
+    echo "📊 Waybar: $waybar_status"
+    
+    # Estado de Kitty
+    local kitty_status="❌"
+    if command -v kitty &>/dev/null; then
+        kitty_status="✅"
+    fi
+    echo "🐱 Kitty: $kitty_status"
+    
+    # Estado de respaldos
+    local backup_status="❌"
+    if [ -d "$HOME/.config/mateOS/backups" ]; then
+        local backup_count=$(find "$HOME/.config/mateOS/backups" -type d -name "mateOS-backup-*" 2>/dev/null | wc -l)
+        if [ "$backup_count" -gt 0 ]; then
+            backup_status="✅ ($backup_count respaldos)"
+        fi
+    fi
+    echo "💾 Respaldos: $backup_status"
+    
+    # Estado de logs
+    local log_status="❌"
+    if [ -d "$HOME/.local/state/mateOS/logs" ]; then
+        local log_count=$(find "$HOME/.local/state/mateOS/logs" -name "*.log" 2>/dev/null | wc -l)
+        if [ "$log_count" -gt 0 ]; then
+            log_status="✅ ($log_count logs)"
+        fi
+    fi
+    echo "📝 Logs: $log_status"
+    
+    # Estado de plugins
+    local plugin_status="❌"
+    if [ -f "$HOME/.config/mateOS/plugins.conf" ]; then
+        local plugin_count=$(mateos-plugins list 2>/dev/null | grep -c "✅" || echo "0")
+        if [ "$plugin_count" -gt 0 ]; then
+            plugin_status="✅ ($plugin_count plugins)"
+        fi
+    fi
+    echo "🔌 Plugins: $plugin_status"
+}
+
+# Función para monitorear recursos del sistema
+monitor_resources() {
+    echo "💻 Recursos del Sistema"
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    
+    # Uso de CPU
+    local cpu_usage=$(top -bn1 | grep "Cpu(s)" | awk '{print $2}' | cut -d'%' -f1)
+    echo "🖥️  CPU: ${cpu_usage}%"
+    
+    # Uso de memoria
+    local mem_info=$(free -h | grep "Mem:")
+    local mem_total=$(echo "$mem_info" | awk '{print $2}')
+    local mem_used=$(echo "$mem_info" | awk '{print $3}')
+    local mem_percent=$(free | grep "Mem:" | awk '{printf "%.1f", $3/$2 * 100.0}')
+    echo "🧠 Memoria: $mem_used/$mem_total (${mem_percent}%)"
+    
+    # Uso de disco
+    local disk_usage=$(df -h / | tail -1 | awk '{print $5}')
+    echo "💾 Disco: $disk_usage usado"
+    
+    # Procesos de MateOS
+    local mateos_processes=$(ps aux | grep -c "mateos" || echo "0")
+    echo "⚙️  Procesos MateOS: $mateos_processes"
+    
+    # Tamaño de MateOS
+    local mateos_size=$(du -sh "$MATEOS_PATH" 2>/dev/null | cut -f1)
+    echo "📦 Tamaño MateOS: $mateos_size"
+}
+
+# Función para monitorear logs en tiempo real
+monitor_logs() {
+    local log_file="$1"
+    local lines="${2:-50}"
+    
+    if [ -z "$log_file" ]; then
+        echo "❌ Error: Debes especificar un archivo de log"
+        return 1
+    fi
+    
+    if [ ! -f "$log_file" ]; then
+        echo "❌ Error: Archivo de log no encontrado: $log_file"
+        return 1
+    fi
+    
+    echo "📝 Monitoreando log: $log_file"
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo "💡 Presiona Ctrl+C para salir"
+    echo ""
+    
+    tail -f -n "$lines" "$log_file"
+}
+
+# Función para monitorear procesos de MateOS
+monitor_processes() {
+    echo "⚙️  Procesos de MateOS"
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    
+    local processes=$(ps aux | grep -E "(mateos|hyprland|waybar|kitty)" | grep -v grep)
+    
+    if [ -n "$processes" ]; then
+        echo "$processes" | while read line; do
+            local pid=$(echo "$line" | awk '{print $2}')
+            local cpu=$(echo "$line" | awk '{print $3}')
+            local mem=$(echo "$line" | awk '{print $4}')
+            local command=$(echo "$line" | awk '{for(i=11;i<=NF;i++) printf "%s ", $i; print ""}')
+            
+            echo "🔄 PID: $pid | CPU: $cpu% | Mem: $mem% | $command"
+        done
+    else
+        echo "ℹ️  No hay procesos de MateOS ejecutándose"
+    fi
+}
+
+# Función para monitorear configuraciones
+monitor_configs() {
+    echo "⚙️  Estado de Configuraciones"
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    
+    # Configuración principal
+    if [ -f "$HOME/.config/mateOS/mateos.conf" ]; then
+        echo "✅ Configuración principal: Presente"
+        local config_size=$(stat -c%s "$HOME/.config/mateOS/mateos.conf" 2>/dev/null || echo "0")
+        echo "   📊 Tamaño: $(numfmt --to=iec $config_size)"
+    else
+        echo "❌ Configuración principal: Faltante"
+    fi
+    
+    # Variables de entorno
+    if [ -f "$HOME/.config/mateOS/mateos.env" ]; then
+        echo "✅ Variables de entorno: Presente"
+    else
+        echo "❌ Variables de entorno: Faltante"
+    fi
+    
+    # Configuración de Hyprland
+    if [ -d "$HOME/.config/hypr" ]; then
+        echo "✅ Configuración Hyprland: Presente"
+        local hypr_files=$(find "$HOME/.config/hypr" -name "*.conf" | wc -l)
+        echo "   📊 Archivos: $hypr_files"
+    else
+        echo "❌ Configuración Hyprland: Faltante"
+    fi
+    
+    # Configuración de Waybar
+    if [ -d "$HOME/.config/waybar" ]; then
+        echo "✅ Configuración Waybar: Presente"
+    else
+        echo "❌ Configuración Waybar: Faltante"
+    fi
+    
+    # Configuración de Kitty
+    if [ -d "$HOME/.config/kitty" ]; then
+        echo "✅ Configuración Kitty: Presente"
+    else
+        echo "❌ Configuración Kitty: Faltante"
+    fi
+}
+
+# Función para monitorear respaldos
+monitor_backups() {
+    echo "💾 Estado de Respaldos"
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    
+    local backup_dir="$HOME/.config/mateOS/backups"
+    
+    if [ -d "$backup_dir" ]; then
+        local backup_count=$(find "$backup_dir" -type d -name "mateOS-backup-*" 2>/dev/null | wc -l)
+        local backup_size=$(du -sh "$backup_dir" 2>/dev/null | cut -f1)
+        
+        echo "📊 Respaldos: $backup_count"
+        echo "📦 Tamaño total: $backup_size"
+        
+        if [ "$backup_count" -gt 0 ]; then
+            echo ""
+            echo "📋 Respaldos disponibles:"
+            find "$backup_dir" -type d -name "mateOS-backup-*" -exec basename {} \; | sort -r | head -5 | while read backup; do
+                local backup_date=$(echo "$backup" | sed 's/mateOS-backup-//' | cut -d'-' -f1-2)
+                local backup_time=$(echo "$backup" | sed 's/mateOS-backup-//' | cut -d'-' -f3-4)
+                echo "  📁 $backup ($backup_date $backup_time)"
+            done
+        fi
+    else
+        echo "❌ Directorio de respaldos no encontrado"
+    fi
+}
+
+# Función para monitorear logs
+monitor_log_files() {
+    echo "📝 Estado de Logs"
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    
+    local log_dir="$HOME/.local/state/mateOS/logs"
+    
+    if [ -d "$log_dir" ]; then
+        local log_count=$(find "$log_dir" -name "*.log" 2>/dev/null | wc -l)
+        local log_size=$(du -sh "$log_dir" 2>/dev/null | cut -f1)
+        
+        echo "📊 Logs: $log_count"
+        echo "📦 Tamaño total: $log_size"
+        
+        if [ "$log_count" -gt 0 ]; then
+            echo ""
+            echo "📋 Logs disponibles:"
+            find "$log_dir" -name "*.log" -exec basename {} \; | sort | while read log; do
+                local log_size=$(du -h "$log_dir/$log" 2>/dev/null | cut -f1)
+                echo "  📄 $log ($log_size)"
+            done
+        fi
+    else
+        echo "❌ Directorio de logs no encontrado"
+    fi
+}
+
+# Función para monitorear plugins
+monitor_plugins() {
+    echo "🔌 Estado de Plugins"
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    
+    if [ -f "$HOME/.config/mateOS/plugins.conf" ]; then
+        local plugin_count=$(mateos-plugins list 2>/dev/null | grep -c "✅" || echo "0")
+        echo "📊 Plugins activos: $plugin_count"
+        
+        if [ "$plugin_count" -gt 0 ]; then
+            echo ""
+            echo "📋 Plugins instalados:"
+            mateos-plugins list 2>/dev/null | grep "✅" | while read line; do
+                echo "  $line"
+            done
+        fi
+    else
+        echo "❌ No hay plugins instalados"
+    fi
+}
+
+# Función para monitoreo continuo
+continuous_monitor() {
+    local interval="${1:-5}"
+    
+    echo "🔄 Monitoreo continuo del sistema MateOS"
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo "⏱️  Intervalo: ${interval}s"
+    echo "💡 Presiona Ctrl+C para salir"
+    echo ""
+    
+    while true; do
+        clear
+        echo "🕐 $(date)"
+        echo ""
+        
+        show_system_status
+        echo ""
+        monitor_resources
+        echo ""
+        monitor_processes
+        echo ""
+        
+        monitor_log "Continuous monitoring: $(date)"
+        
+        sleep "$interval"
+    done
+}
+
+# Función para generar reporte de monitoreo
+generate_monitor_report() {
+    local report_file="$HOME/.local/state/mateOS/monitor-report-$(date +%Y%m%d-%H%M%S).txt"
+    
+    echo "📋 Generando reporte de monitoreo..."
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    
+    cat > "$report_file" << EOF
+# Reporte de Monitoreo MateOS
+# Generado: $(date)
+
+## Estado del Sistema
+$(show_system_status)
+
+## Recursos del Sistema
+$(monitor_resources)
+
+## Procesos
+$(monitor_processes)
+
+## Configuraciones
+$(monitor_configs)
+
+## Respaldos
+$(monitor_backups)
+
+## Logs
+$(monitor_log_files)
+
+## Plugins
+$(monitor_plugins)
+
+## Información del Sistema
+- Usuario: $USER
+- Sistema: $(uname -s)
+- Arquitectura: $(uname -m)
+- Kernel: $(uname -r)
+- Uptime: $(uptime -p)
+
+EOF
+    
+    echo "✅ Reporte generado: $report_file"
+    monitor_log "Monitor report generated: $report_file"
+}
+
+# Función para configurar monitoreo
+configure_monitoring() {
+    local interval="$1"
+    local auto_report="$2"
+    local log_rotation="$3"
+    
+    if [ -z "$interval" ]; then
+        echo "📋 Configuración actual de monitoreo:"
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        
+        if [ -f "$MONITOR_CONFIG" ]; then
+            cat "$MONITOR_CONFIG"
+        else
+            echo "No hay configuración de monitoreo"
+        fi
+        return
+    fi
+    
+    # Crear archivo de configuración
+    cat > "$MONITOR_CONFIG" << EOF
+# MateOS Monitor Configuration
+# Configuración de monitoreo de MateOS
+
+[general]
+interval = ${interval:-5}
+auto_report = ${auto_report:-false}
+log_rotation = ${log_rotation:-7}
+
+[monitoring]
+system_status = true
+resources = true
+processes = true
+configs = true
+backups = true
+logs = true
+plugins = true
+
+[alerts]
+cpu_threshold = 80
+memory_threshold = 80
+disk_threshold = 90
+backup_age_days = 7
+EOF
+    
+    monitor_log "Monitoring configured: interval=$interval, auto_report=$auto_report"
+    
+    echo "✅ Configuración de monitoreo actualizada"
+}
+
+# Función principal
+case "$1" in
+    "status")
+        show_system_status
+        ;;
+    "resources")
+        monitor_resources
+        ;;
+    "processes")
+        monitor_processes
+        ;;
+    "configs")
+        monitor_configs
+        ;;
+    "backups")
+        monitor_backups
+        ;;
+    "logs")
+        monitor_log_files
+        ;;
+    "plugins")
+        monitor_plugins
+        ;;
+    "watch")
+        monitor_logs "$2" "$3"
+        ;;
+    "continuous"|"cont")
+        continuous_monitor "$2"
+        ;;
+    "report")
+        generate_monitor_report
+        ;;
+    "configure")
+        configure_monitoring "$2" "$3" "$4"
+        ;;
+    "all")
+        show_system_status
+        echo ""
+        monitor_resources
+        echo ""
+        monitor_processes
+        echo ""
+        monitor_configs
+        echo ""
+        monitor_backups
+        echo ""
+        monitor_log_files
+        echo ""
+        monitor_plugins
+        ;;
+    *)
+        echo "📊 MateOS System Monitor"
+        echo ""
+        echo "Uso: mateos-monitor <comando> [argumentos]"
+        echo ""
+        echo "Comandos:"
+        echo "  status                    - Estado del sistema"
+        echo "  resources                - Recursos del sistema"
+        echo "  processes                - Procesos de MateOS"
+        echo "  configs                  - Estado de configuraciones"
+        echo "  backups                  - Estado de respaldos"
+        echo "  logs                     - Estado de logs"
+        echo "  plugins                  - Estado de plugins"
+        echo "  watch <archivo> [líneas] - Monitorear log en tiempo real"
+        echo "  continuous [intervalo]   - Monitoreo continuo"
+        echo "  report                   - Generar reporte"
+        echo "  configure <interval> [auto_report] [log_rotation] - Configurar"
+        echo "  all                      - Mostrar todo"
+        echo ""
+        echo "Ejemplos:"
+        echo "  mateos-monitor status"
+        echo "  mateos-monitor watch /path/to/log 100"
+        echo "  mateos-monitor continuous 10"
+        echo "  mateos-monitor configure 5 true 7"
+        ;;
+esac
