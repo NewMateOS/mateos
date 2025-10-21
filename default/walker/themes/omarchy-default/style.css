@@ -1,4 +1,4 @@
-@import "../../../../../../../.config/mateos/current/theme/walker.css";
+@import "~/.config/mateos/current/theme/walker.css";
 
 * {
   all: unset;

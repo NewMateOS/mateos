@@ -1,0 +1,317 @@
+#!/bin/bash
+
+# MateOS Centralized Logging System
+# Sistema de logging centralizado de MateOS
+
+MATEOS_PATH="${MATEOS_PATH:-$HOME/.local/share/mateOS}"
+LOG_DIR="$HOME/.local/state/mateOS/logs"
+LOG_LEVEL="${MATEOS_LOG_LEVEL:-INFO}"
+MAX_LOG_FILES="${MATEOS_LOG_MAX_FILES:-7}"
+
+# Crear directorio de logs si no existe
+mkdir -p "$LOG_DIR"
+
+# Niveles de log
+declare -A LOG_LEVELS
+LOG_LEVELS[DEBUG]=0
+LOG_LEVELS[INFO]=1
+LOG_LEVELS[WARN]=2
+LOG_LEVELS[ERROR]=3
+LOG_LEVELS[CRITICAL]=4
+
+# Función para obtener timestamp
+get_timestamp() {
+    date '+%Y-%m-%d %H:%M:%S'
+}
+
+# Función para obtener nivel numérico
+get_level_num() {
+    local level="$1"
+    echo "${LOG_LEVELS[$level]:-1}"
+}
+
+# Función para logging
+log() {
+    local level="$1"
+    local message="$2"
+    local component="${3:-system}"
+    local timestamp=$(get_timestamp)
+    
+    # Verificar si debemos loggear este nivel
+    local current_level_num=$(get_level_num "$LOG_LEVEL")
+    local message_level_num=$(get_level_num "$level")
+    
+    if [ $message_level_num -lt $current_level_num ]; then
+        return 0
+    fi
+    
+    # Crear archivo de log por componente
+    local log_file="$LOG_DIR/${component}.log"
+    
+    # Escribir al log
+    echo "[$timestamp] [$level] $message" >> "$log_file"
+    
+    # También escribir al log general
+    echo "[$timestamp] [$level] [$component] $message" >> "$LOG_DIR/mateOS.log"
+    
+    # Si es ERROR o CRITICAL, también mostrar en consola
+    if [ $message_level_num -ge 2 ]; then
+        case "$level" in
+            "ERROR")
+                echo -e "\033[0;31m[ERROR] $message\033[0m" >&2
+                ;;
+            "CRITICAL")
+                echo -e "\033[1;31m[CRITICAL] $message\033[0m" >&2
+                ;;
+            "WARN")
+                echo -e "\033[0;33m[WARN] $message\033[0m" >&2
+                ;;
+        esac
+    fi
+}
+
+# Función para rotar logs
+rotate_logs() {
+    log "INFO" "Iniciando rotación de logs" "system"
+    
+    # Rotar logs por componente
+    for log_file in "$LOG_DIR"/*.log; do
+        if [ -f "$log_file" ] && [ "$(basename "$log_file")" != "mateOS.log" ]; then
+            local component=$(basename "$log_file" .log)
+            local backup_file="$log_file.$(date +%Y%m%d-%H%M%S)"
+            
+            # Crear backup
+            cp "$log_file" "$backup_file"
+            
+            # Limpiar log actual
+            > "$log_file"
+            
+            log "INFO" "Log rotado: $component" "system"
+        fi
+    done
+    
+    # Limpiar logs antiguos
+    find "$LOG_DIR" -name "*.log.*" -mtime +$MAX_LOG_FILES -delete 2>/dev/null
+    
+    log "INFO" "Rotación de logs completada" "system"
+}
+
+# Función para mostrar logs
+show_logs() {
+    local component="$1"
+    local lines="${2:-50}"
+    local level="${3:-ALL}"
+    
+    if [ -z "$component" ]; then
+        echo "📋 Logs disponibles:"
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        ls -1 "$LOG_DIR"/*.log 2>/dev/null | while read log_file; do
+            local name=$(basename "$log_file" .log)
+            local size=$(du -sh "$log_file" 2>/dev/null | cut -f1)
+            local lines_count=$(wc -l < "$log_file" 2>/dev/null)
+            echo "  📄 $name ($size, $lines_count líneas)"
+        done
+        return
+    fi
+    
+    local log_file="$LOG_DIR/${component}.log"
+    
+    if [ ! -f "$log_file" ]; then
+        echo "❌ Log no encontrado: $component"
+        return 1
+    fi
+    
+    echo "📋 Log de $component (últimas $lines líneas):"
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    
+    if [ "$level" = "ALL" ]; then
+        tail -n "$lines" "$log_file"
+    else
+        tail -n "$lines" "$log_file" | grep "\[$level\]"
+    fi
+}
+
+# Función para buscar en logs
+search_logs() {
+    local pattern="$1"
+    local component="${2:-ALL}"
+    local days="${3:-7}"
+    
+    if [ -z "$pattern" ]; then
+        echo "❌ Error: Debes especificar un patrón de búsqueda"
+        echo "Uso: mateos-log search <patrón> [componente] [días]"
+        return 1
+    fi
+    
+    echo "🔍 Buscando '$pattern' en logs (últimos $days días):"
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    
+    local found=0
+    
+    if [ "$component" = "ALL" ]; then
+        # Buscar en todos los logs
+        find "$LOG_DIR" -name "*.log" -mtime -$days -exec grep -H "$pattern" {} \; 2>/dev/null | while read line; do
+            echo "  $line"
+            found=1
+        done
+    else
+        # Buscar en log específico
+        local log_file="$LOG_DIR/${component}.log"
+        if [ -f "$log_file" ]; then
+            grep "$pattern" "$log_file" 2>/dev/null | while read line; do
+                echo "  $line"
+                found=1
+            done
+        fi
+    fi
+    
+    if [ $found -eq 0 ]; then
+        echo "  No se encontraron coincidencias"
+    fi
+}
+
+# Función para limpiar logs
+clean_logs() {
+    local days="${1:-30}"
+    local confirm="${2:-false}"
+    
+    if [ "$confirm" != "true" ]; then
+        echo "⚠️  ¿Estás seguro de que quieres limpiar logs de más de $days días?"
+        echo "Esta acción no se puede deshacer."
+        read -p "Escribe 'yes' para confirmar: " confirm_input
+        
+        if [ "$confirm_input" != "yes" ]; then
+            echo "❌ Operación cancelada"
+            return 1
+        fi
+    fi
+    
+    log "INFO" "Iniciando limpieza de logs (más de $days días)" "system"
+    
+    # Limpiar logs antiguos
+    find "$LOG_DIR" -name "*.log.*" -mtime +$days -delete 2>/dev/null
+    
+    # Limpiar logs vacíos
+    find "$LOG_DIR" -name "*.log" -size 0 -delete 2>/dev/null
+    
+    log "INFO" "Limpieza de logs completada" "system"
+    echo "✅ Logs limpiados (más de $days días)"
+}
+
+# Función para configurar logging
+configure_logging() {
+    local level="$1"
+    local max_files="$2"
+    
+    if [ -z "$level" ]; then
+        echo "📋 Configuración actual de logging:"
+        echo "  Nivel: $LOG_LEVEL"
+        echo "  Máximo archivos: $MAX_LOG_FILES"
+        echo "  Directorio: $LOG_DIR"
+        return
+    fi
+    
+    # Validar nivel
+    if [ -z "${LOG_LEVELS[$level]}" ]; then
+        echo "❌ Error: Nivel de log inválido: $level"
+        echo "Niveles disponibles: DEBUG, INFO, WARN, ERROR, CRITICAL"
+        return 1
+    fi
+    
+    # Actualizar configuración
+    if [ -n "$max_files" ]; then
+        export MATEOS_LOG_MAX_FILES="$max_files"
+    fi
+    
+    export MATEOS_LOG_LEVEL="$level"
+    
+    log "INFO" "Configuración de logging actualizada: nivel=$level, max_files=${max_files:-$MAX_LOG_FILES}" "system"
+    echo "✅ Configuración de logging actualizada"
+}
+
+# Función para monitorear logs en tiempo real
+monitor_logs() {
+    local component="${1:-mateOS}"
+    local level="${2:-ALL}"
+    
+    local log_file="$LOG_DIR/${component}.log"
+    
+    if [ ! -f "$log_file" ]; then
+        echo "❌ Log no encontrado: $component"
+        return 1
+    fi
+    
+    echo "👁️  Monitoreando log de $component (Ctrl+C para salir):"
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    
+    if [ "$level" = "ALL" ]; then
+        tail -f "$log_file"
+    else
+        tail -f "$log_file" | grep "\[$level\]"
+    fi
+}
+
+# Función principal
+case "$1" in
+    "debug")
+        log "DEBUG" "$2" "${3:-system}"
+        ;;
+    "info")
+        log "INFO" "$2" "${3:-system}"
+        ;;
+    "warn")
+        log "WARN" "$2" "${3:-system}"
+        ;;
+    "error")
+        log "ERROR" "$2" "${3:-system}"
+        ;;
+    "critical")
+        log "CRITICAL" "$2" "${3:-system}"
+        ;;
+    "show"|"cat")
+        show_logs "$2" "$3" "$4"
+        ;;
+    "search"|"grep")
+        search_logs "$2" "$3" "$4"
+        ;;
+    "clean")
+        clean_logs "$2" "$3"
+        ;;
+    "rotate")
+        rotate_logs
+        ;;
+    "configure"|"config")
+        configure_logging "$2" "$3"
+        ;;
+    "monitor"|"tail")
+        monitor_logs "$2" "$3"
+        ;;
+    *)
+        echo "📋 MateOS Centralized Logging System"
+        echo ""
+        echo "Uso: mateos-log <comando> [argumentos]"
+        echo ""
+        echo "Comandos de logging:"
+        echo "  debug <mensaje> [componente]    - Log de debug"
+        echo "  info <mensaje> [componente]     - Log de información"
+        echo "  warn <mensaje> [componente]     - Log de advertencia"
+        echo "  error <mensaje> [componente]   - Log de error"
+        echo "  critical <mensaje> [componente] - Log crítico"
+        echo ""
+        echo "Comandos de gestión:"
+        echo "  show [componente] [líneas] [nivel] - Mostrar logs"
+        echo "  search <patrón> [componente] [días] - Buscar en logs"
+        echo "  clean [días] [confirm]             - Limpiar logs antiguos"
+        echo "  rotate                             - Rotar logs"
+        echo "  configure <nivel> [max_archivos]    - Configurar logging"
+        echo "  monitor [componente] [nivel]        - Monitorear logs en tiempo real"
+        echo ""
+        echo "Niveles disponibles: DEBUG, INFO, WARN, ERROR, CRITICAL"
+        echo ""
+        echo "Ejemplos:"
+        echo "  mateos-log info 'Sistema iniciado' system"
+        echo "  mateos-log show system 100"
+        echo "  mateos-log search 'error' system 3"
+        echo "  mateos-log monitor system ERROR"
+        ;;
+esac

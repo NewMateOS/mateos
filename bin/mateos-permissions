@@ -1,0 +1,364 @@
+#!/bin/bash
+
+# MateOS Permissions Management System
+# Sistema de gestión de permisos granulares de MateOS
+
+MATEOS_PATH="${MATEOS_PATH:-$HOME/.local/share/mateOS}"
+PERMISSIONS_FILE="$HOME/.config/mateOS/permissions.conf"
+AUDIT_LOG="$HOME/.local/state/mateOS/logs/permissions.log"
+
+# Crear directorios necesarios
+mkdir -p "$(dirname "$PERMISSIONS_FILE")" "$(dirname "$AUDIT_LOG")"
+
+# Función para logging de auditoría
+audit_log() {
+    local action="$1"
+    local resource="$2"
+    local user="$3"
+    local result="$4"
+    local timestamp=$(date '+%Y-%m-%d %H:%M:%S')
+    
+    echo "[$timestamp] $action:$resource:$user:$result" >> "$AUDIT_LOG"
+}
+
+# Función para verificar permisos
+check_permission() {
+    local user="$1"
+    local action="$2"
+    local resource="$3"
+    
+    # Si no hay archivo de permisos, permitir todo (modo inicial)
+    if [ ! -f "$PERMISSIONS_FILE" ]; then
+        return 0
+    fi
+    
+    # Buscar permiso específico
+    local permission=$(grep "^$user:$action:$resource:" "$PERMISSIONS_FILE" 2>/dev/null | cut -d: -f4)
+    
+    if [ "$permission" = "allow" ]; then
+        return 0
+    elif [ "$permission" = "deny" ]; then
+        return 1
+    fi
+    
+    # Buscar permiso genérico para el usuario
+    local generic_permission=$(grep "^$user:$action:\*:" "$PERMISSIONS_FILE" 2>/dev/null | cut -d: -f4)
+    
+    if [ "$generic_permission" = "allow" ]; then
+        return 0
+    elif [ "$generic_permission" = "deny" ]; then
+        return 1
+    fi
+    
+    # Buscar permiso genérico para la acción
+    local action_permission=$(grep "^\*:$action:$resource:" "$PERMISSIONS_FILE" 2>/dev/null | cut -d: -f4)
+    
+    if [ "$action_permission" = "allow" ]; then
+        return 0
+    elif [ "$action_permission" = "deny" ]; then
+        return 1
+    fi
+    
+    # Por defecto, denegar si no hay regla específica
+    return 1
+}
+
+# Función para establecer permisos
+set_permission() {
+    local user="$1"
+    local action="$2"
+    local resource="$3"
+    local permission="$4"
+    
+    if [ -z "$user" ] || [ -z "$action" ] || [ -z "$resource" ] || [ -z "$permission" ]; then
+        echo "❌ Error: Parámetros incompletos"
+        echo "Uso: mateos-permissions set <usuario> <acción> <recurso> <permitir|denegar>"
+        return 1
+    fi
+    
+    if [ "$permission" != "allow" ] && [ "$permission" != "deny" ]; then
+        echo "❌ Error: Permiso debe ser 'allow' o 'deny'"
+        return 1
+    fi
+    
+    # Crear archivo si no existe
+    if [ ! -f "$PERMISSIONS_FILE" ]; then
+        cat > "$PERMISSIONS_FILE" << EOF
+# MateOS Permissions Configuration
+# Formato: usuario:acción:recurso:permiso
+# Usuarios: * (todos), nombre_usuario
+# Acciones: read, write, execute, admin
+# Recursos: * (todos), archivo específico, directorio
+# Permisos: allow, deny
+
+EOF
+    fi
+    
+    # Eliminar regla existente si existe
+    sed -i "/^$user:$action:$resource:/d" "$PERMISSIONS_FILE"
+    
+    # Añadir nueva regla
+    echo "$user:$action:$resource:$permission" >> "$PERMISSIONS_FILE"
+    
+    # Log de auditoría
+    audit_log "SET_PERMISSION" "$resource" "$user" "$permission"
+    
+    echo "✅ Permiso establecido: $user:$action:$resource:$permission"
+}
+
+# Función para revocar permisos
+revoke_permission() {
+    local user="$1"
+    local action="$2"
+    local resource="$3"
+    
+    if [ -z "$user" ] || [ -z "$action" ] || [ -z "$resource" ]; then
+        echo "❌ Error: Parámetros incompletos"
+        echo "Uso: mateos-permissions revoke <usuario> <acción> <recurso>"
+        return 1
+    fi
+    
+    # Eliminar regla
+    sed -i "/^$user:$action:$resource:/d" "$PERMISSIONS_FILE"
+    
+    # Log de auditoría
+    audit_log "REVOKE_PERMISSION" "$resource" "$user" "revoked"
+    
+    echo "✅ Permiso revocado: $user:$action:$resource"
+}
+
+# Función para listar permisos
+list_permissions() {
+    local user="${1:-*}"
+    local action="${2:-*}"
+    local resource="${3:-*}"
+    
+    if [ ! -f "$PERMISSIONS_FILE" ]; then
+        echo "📋 No hay permisos configurados"
+        return
+    fi
+    
+    echo "📋 Permisos de MateOS:"
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    
+    if [ "$user" = "*" ] && [ "$action" = "*" ] && [ "$resource" = "*" ]; then
+        # Mostrar todos los permisos
+        grep -v "^#" "$PERMISSIONS_FILE" | while IFS=: read -r u a r p; do
+            if [ -n "$u" ]; then
+                local status="✅"
+                if [ "$p" = "deny" ]; then
+                    status="❌"
+                fi
+                echo "  $status $u:$a:$r -> $p"
+            fi
+        done
+    else
+        # Filtrar permisos
+        grep -v "^#" "$PERMISSIONS_FILE" | while IFS=: read -r u a r p; do
+            if [ -n "$u" ]; then
+                local match=true
+                
+                if [ "$user" != "*" ] && [ "$u" != "$user" ]; then
+                    match=false
+                fi
+                
+                if [ "$action" != "*" ] && [ "$a" != "$action" ]; then
+                    match=false
+                fi
+                
+                if [ "$resource" != "*" ] && [ "$r" != "$resource" ]; then
+                    match=false
+                fi
+                
+                if [ "$match" = true ]; then
+                    local status="✅"
+                    if [ "$p" = "deny" ]; then
+                        status="❌"
+                    fi
+                    echo "  $status $u:$a:$r -> $p"
+                fi
+            fi
+        done
+    fi
+}
+
+# Función para verificar acceso
+check_access() {
+    local user="$1"
+    local action="$2"
+    local resource="$3"
+    
+    if [ -z "$user" ] || [ -z "$action" ] || [ -z "$resource" ]; then
+        echo "❌ Error: Parámetros incompletos"
+        echo "Uso: mateos-permissions check <usuario> <acción> <recurso>"
+        return 1
+    fi
+    
+    if check_permission "$user" "$action" "$resource"; then
+        echo "✅ Acceso permitido: $user:$action:$resource"
+        audit_log "CHECK_ACCESS" "$resource" "$user" "allowed"
+        return 0
+    else
+        echo "❌ Acceso denegado: $user:$action:$resource"
+        audit_log "CHECK_ACCESS" "$resource" "$user" "denied"
+        return 1
+    fi
+}
+
+# Función para crear perfiles de permisos
+create_profile() {
+    local profile_name="$1"
+    local description="$2"
+    
+    if [ -z "$profile_name" ]; then
+        echo "❌ Error: Debes especificar un nombre de perfil"
+        return 1
+    fi
+    
+    local profile_file="$HOME/.config/mateOS/profiles/$profile_name.permissions"
+    mkdir -p "$(dirname "$profile_file")"
+    
+    cat > "$profile_file" << EOF
+# MateOS Permission Profile: $profile_name
+# $description
+# Creado: $(date)
+
+# Permisos básicos para usuario normal
+$USER:read:*:allow
+$USER:execute:mateos-*:allow
+
+# Permisos administrativos (requieren sudo)
+$USER:admin:*:deny
+$USER:write:/etc/*:deny
+$USER:write:/usr/*:deny
+
+# Permisos específicos de MateOS
+$USER:write:$MATEOS_PATH/config/*:allow
+$USER:read:$MATEOS_PATH/*:allow
+$USER:execute:$MATEOS_PATH/bin/*:allow
+EOF
+    
+    echo "✅ Perfil de permisos creado: $profile_name"
+    echo "📁 Ubicación: $profile_file"
+}
+
+# Función para aplicar perfil
+apply_profile() {
+    local profile_name="$1"
+    
+    if [ -z "$profile_name" ]; then
+        echo "❌ Error: Debes especificar un nombre de perfil"
+        return 1
+    fi
+    
+    local profile_file="$HOME/.config/mateOS/profiles/$profile_name.permissions"
+    
+    if [ ! -f "$profile_file" ]; then
+        echo "❌ Error: Perfil no encontrado: $profile_name"
+        return 1
+    fi
+    
+    # Aplicar permisos del perfil
+    grep -v "^#" "$profile_file" | while IFS=: read -r user action resource permission; do
+        if [ -n "$user" ] && [ -n "$action" ] && [ -n "$resource" ] && [ -n "$permission" ]; then
+            set_permission "$user" "$action" "$resource" "$permission"
+        fi
+    done
+    
+    echo "✅ Perfil aplicado: $profile_name"
+}
+
+# Función para mostrar auditoría
+show_audit() {
+    local lines="${1:-50}"
+    local user="${2:-*}"
+    
+    echo "📋 Log de auditoría de permisos (últimas $lines líneas):"
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    
+    if [ "$user" = "*" ]; then
+        tail -n "$lines" "$AUDIT_LOG" 2>/dev/null || echo "No hay registros de auditoría"
+    else
+        tail -n "$lines" "$AUDIT_LOG" 2>/dev/null | grep ":$user:" || echo "No hay registros para el usuario $user"
+    fi
+}
+
+# Función para resetear permisos
+reset_permissions() {
+    local confirm="${1:-false}"
+    
+    if [ "$confirm" != "true" ]; then
+        echo "⚠️  ¿Estás seguro de que quieres resetear todos los permisos?"
+        echo "Esta acción no se puede deshacer."
+        read -p "Escribe 'yes' para confirmar: " confirm_input
+        
+        if [ "$confirm_input" != "yes" ]; then
+            echo "❌ Operación cancelada"
+            return 1
+        fi
+    fi
+    
+    # Crear respaldo
+    if [ -f "$PERMISSIONS_FILE" ]; then
+        cp "$PERMISSIONS_FILE" "$PERMISSIONS_FILE.backup.$(date +%s)"
+    fi
+    
+    # Resetear archivo
+    > "$PERMISSIONS_FILE"
+    
+    audit_log "RESET_PERMISSIONS" "*" "$USER" "reset"
+    
+    echo "✅ Permisos reseteados"
+}
+
+# Función principal
+case "$1" in
+    "set")
+        set_permission "$2" "$3" "$4" "$5"
+        ;;
+    "revoke")
+        revoke_permission "$2" "$3" "$4"
+        ;;
+    "list"|"ls")
+        list_permissions "$2" "$3" "$4"
+        ;;
+    "check")
+        check_access "$2" "$3" "$4"
+        ;;
+    "create-profile")
+        create_profile "$2" "$3"
+        ;;
+    "apply-profile")
+        apply_profile "$2"
+        ;;
+    "audit")
+        show_audit "$2" "$3"
+        ;;
+    "reset")
+        reset_permissions "$2"
+        ;;
+    *)
+        echo "🔒 MateOS Permissions Management System"
+        echo ""
+        echo "Uso: mateos-permissions <comando> [argumentos]"
+        echo ""
+        echo "Comandos:"
+        echo "  set <usuario> <acción> <recurso> <permitir|denegar> - Establecer permiso"
+        echo "  revoke <usuario> <acción> <recurso>                - Revocar permiso"
+        echo "  list [usuario] [acción] [recurso]                    - Listar permisos"
+        echo "  check <usuario> <acción> <recurso>                  - Verificar acceso"
+        echo "  create-profile <nombre> [descripción]               - Crear perfil de permisos"
+        echo "  apply-profile <nombre>                               - Aplicar perfil"
+        echo "  audit [líneas] [usuario]                            - Mostrar auditoría"
+        echo "  reset [confirm]                                     - Resetear permisos"
+        echo ""
+        echo "Acciones disponibles: read, write, execute, admin"
+        echo "Recursos: * (todos), archivo específico, directorio"
+        echo ""
+        echo "Ejemplos:"
+        echo "  mateos-permissions set $USER read config allow"
+        echo "  mateos-permissions check $USER write /etc/deny"
+        echo "  mateos-permissions create-profile developer"
+        echo "  mateos-permissions audit 100"
+        ;;
+esac

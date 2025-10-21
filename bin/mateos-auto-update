@@ -1,0 +1,402 @@
+#!/bin/bash
+
+# MateOS Auto-Update System
+# Sistema de auto-actualización de configuraciones de MateOS
+
+MATEOS_PATH="${MATEOS_PATH:-$HOME/.local/share/mateOS}"
+UPDATE_DIR="$HOME/.config/mateOS/updates"
+WATCH_DIR="$MATEOS_PATH"
+UPDATE_LOG="$HOME/.local/state/mateOS/logs/auto-update.log"
+
+# Crear directorios necesarios
+mkdir -p "$UPDATE_DIR" "$(dirname "$UPDATE_LOG")"
+
+# Función para logging
+log_update() {
+    local message="$1"
+    local timestamp=$(date '+%Y-%m-%d %H:%M:%S')
+    echo "[$timestamp] $message" >> "$UPDATE_LOG"
+}
+
+# Función para verificar actualizaciones disponibles
+check_updates() {
+    local component="$1"
+    
+    echo "🔍 Verificando actualizaciones disponibles..."
+    echo ""
+    
+    local updates_found=0
+    
+    if [ -z "$component" ] || [ "$component" = "config" ]; then
+        echo "📋 Verificando configuraciones..."
+        
+        # Verificar si hay configuraciones más nuevas en el repositorio
+        if [ -d "$MATEOS_PATH/.git" ]; then
+            cd "$MATEOS_PATH"
+            git fetch origin &>/dev/null
+            
+            local local_commit=$(git rev-parse HEAD)
+            local remote_commit=$(git rev-parse origin/main 2>/dev/null)
+            
+            if [ "$local_commit" != "$remote_commit" ]; then
+                echo "  ✅ Configuraciones actualizables disponibles"
+                ((updates_found++))
+            else
+                echo "  ✅ Configuraciones actualizadas"
+            fi
+        else
+            echo "  ⚠️  No es un repositorio Git"
+        fi
+    fi
+    
+    if [ -z "$component" ] || [ "$component" = "scripts" ]; then
+        echo "📋 Verificando scripts..."
+        
+        # Verificar scripts que han cambiado
+        local changed_scripts=$(find "$MATEOS_PATH/bin" -name "*.sh" -newer "$UPDATE_DIR/last-check" 2>/dev/null | wc -l)
+        
+        if [ $changed_scripts -gt 0 ]; then
+            echo "  ✅ $changed_scripts scripts actualizables"
+            ((updates_found++))
+        else
+            echo "  ✅ Scripts actualizados"
+        fi
+    fi
+    
+    if [ -z "$component" ] || [ "$component" = "themes" ]; then
+        echo "📋 Verificando temas..."
+        
+        # Verificar temas disponibles
+        local themes_dir="$HOME/.config/mateOS/themes"
+        if [ -d "$themes_dir" ]; then
+            local theme_count=$(find "$themes_dir" -maxdepth 1 -type d | wc -l)
+            echo "  ✅ $theme_count temas disponibles"
+        else
+            echo "  ℹ️  No hay temas instalados"
+        fi
+    fi
+    
+    # Actualizar timestamp de última verificación
+    touch "$UPDATE_DIR/last-check"
+    
+    if [ $updates_found -gt 0 ]; then
+        echo ""
+        echo "📊 Se encontraron $updates_found tipos de actualizaciones"
+        echo "💡 Ejecuta: mateos-auto-update apply para aplicar actualizaciones"
+    else
+        echo ""
+        echo "✅ Todo está actualizado"
+    fi
+}
+
+# Función para aplicar actualizaciones
+apply_updates() {
+    local component="$1"
+    local force="${2:-false}"
+    
+    echo "🔄 Aplicando actualizaciones de MateOS..."
+    echo ""
+    
+    local applied=0
+    local errors=0
+    
+    # Crear respaldo antes de actualizar
+    local backup_dir="$UPDATE_DIR/backup-$(date +%Y%m%d-%H%M%S)"
+    mkdir -p "$backup_dir"
+    
+    if [ -z "$component" ] || [ "$component" = "config" ]; then
+        echo "📋 Actualizando configuraciones..."
+        
+        # Respaldar configuraciones actuales
+        if [ -d "$HOME/.config/mateOS" ]; then
+            cp -r "$HOME/.config/mateOS" "$backup_dir/"
+            echo "  📦 Respaldo creado: $backup_dir/mateOS"
+        fi
+        
+        # Aplicar configuraciones desde MateOS
+        if [ -d "$MATEOS_PATH/config" ]; then
+            cp -r "$MATEOS_PATH/config"/* "$HOME/.config/mateOS/" 2>/dev/null
+            echo "  ✅ Configuraciones aplicadas"
+            ((applied++))
+        else
+            echo "  ❌ No se encontraron configuraciones para aplicar"
+            ((errors++))
+        fi
+    fi
+    
+    if [ -z "$component" ] || [ "$component" = "scripts" ]; then
+        echo "📋 Actualizando scripts..."
+        
+        # Respaldar scripts actuales
+        if [ -d "$HOME/.local/bin" ]; then
+            cp -r "$HOME/.local/bin" "$backup_dir/" 2>/dev/null
+        fi
+        
+        # Aplicar scripts actualizados
+        if [ -d "$MATEOS_PATH/bin" ]; then
+            # Crear enlaces simbólicos a los scripts
+            for script in "$MATEOS_PATH/bin"/*; do
+                if [ -f "$script" ] && [ -x "$script" ]; then
+                    local script_name=$(basename "$script")
+                    local target="$HOME/.local/bin/$script_name"
+                    
+                    # Crear enlace simbólico
+                    ln -sf "$script" "$target" 2>/dev/null
+                    echo "  ✅ $script_name actualizado"
+                    ((applied++))
+                fi
+            done
+        else
+            echo "  ❌ No se encontraron scripts para aplicar"
+            ((errors++))
+        fi
+    fi
+    
+    if [ -z "$component" ] || [ "$component" = "themes" ]; then
+        echo "📋 Actualizando temas..."
+        
+        # Aplicar tema actual si está configurado
+        local current_theme=$(mateos-config get themes default_theme 2>/dev/null)
+        if [ -n "$current_theme" ]; then
+            mateos-theme-set "$current_theme" 2>/dev/null
+            echo "  ✅ Tema $current_theme aplicado"
+            ((applied++))
+        else
+            echo "  ℹ️  No hay tema configurado"
+        fi
+    fi
+    
+    # Log de actualización
+    log_update "Updates applied: $applied, Errors: $errors"
+    
+    echo ""
+    echo "📊 Resumen de actualización:"
+    echo "  ✅ Aplicados: $applied"
+    if [ $errors -gt 0 ]; then
+        echo "  ❌ Errores: $errors"
+    fi
+    
+    if [ $applied -gt 0 ]; then
+        echo ""
+        echo "🔄 Reinicia tu sesión para aplicar todos los cambios"
+    fi
+}
+
+# Función para monitorear cambios
+monitor_changes() {
+    local interval="${1:-60}"
+    local component="${2:-ALL}"
+    
+    echo "👁️  Monitoreando cambios en MateOS (cada ${interval}s, Ctrl+C para salir)..."
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    
+    local last_check=$(date +%s)
+    
+    while true; do
+        local current_time=$(date +%s)
+        local time_diff=$((current_time - last_check))
+        
+        if [ $time_diff -ge $interval ]; then
+            local timestamp=$(date '+%H:%M:%S')
+            echo "[$timestamp] Verificando cambios..."
+            
+            # Verificar cambios en archivos
+            local changes=$(find "$WATCH_DIR" -type f -newer "$UPDATE_DIR/last-check" 2>/dev/null | wc -l)
+            
+            if [ $changes -gt 0 ]; then
+                echo "[$timestamp] ⚠️  Se detectaron $changes cambios"
+                log_update "Changes detected: $changes files"
+                
+                # Aplicar actualizaciones automáticamente si está habilitado
+                if [ "$MATEOS_AUTO_UPDATE" = "true" ]; then
+                    echo "[$timestamp] 🔄 Aplicando actualizaciones automáticas..."
+                    apply_updates "$component"
+                else
+                    echo "[$timestamp] 💡 Ejecuta: mateos-auto-update apply para aplicar cambios"
+                fi
+            else
+                echo "[$timestamp] ✅ Sin cambios detectados"
+            fi
+            
+            # Actualizar timestamp
+            touch "$UPDATE_DIR/last-check"
+            last_check=$current_time
+        fi
+        
+        sleep 1
+    done
+}
+
+# Función para configurar auto-actualización
+configure_auto_update() {
+    local enabled="$1"
+    local interval="$2"
+    local component="$3"
+    
+    if [ -z "$enabled" ]; then
+        echo "📋 Configuración actual de auto-actualización:"
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        echo "  Habilitado: ${MATEOS_AUTO_UPDATE:-false}"
+        echo "  Intervalo: ${MATEOS_UPDATE_INTERVAL:-60}s"
+        echo "  Componente: ${MATEOS_UPDATE_COMPONENT:-ALL}"
+        return
+    fi
+    
+    # Crear archivo de configuración
+    local config_file="$UPDATE_DIR/auto-update.conf"
+    
+    cat > "$config_file" << EOF
+# MateOS Auto-Update Configuration
+# Configuración de auto-actualización de MateOS
+
+[general]
+enabled = $enabled
+interval = ${interval:-60}
+component = ${component:-ALL}
+
+[notifications]
+show_notifications = true
+log_changes = true
+backup_before_update = true
+
+[components]
+update_config = true
+update_scripts = true
+update_themes = true
+update_profiles = true
+EOF
+    
+    # Exportar variables de entorno
+    export MATEOS_AUTO_UPDATE="$enabled"
+    export MATEOS_UPDATE_INTERVAL="${interval:-60}"
+    export MATEOS_UPDATE_COMPONENT="${component:-ALL}"
+    
+    log_update "Auto-update configured: enabled=$enabled, interval=${interval:-60}, component=${component:-ALL}"
+    
+    echo "✅ Auto-actualización configurada:"
+    echo "  Habilitado: $enabled"
+    echo "  Intervalo: ${interval:-60}s"
+    echo "  Componente: ${component:-ALL}"
+}
+
+# Función para programar actualizaciones
+schedule_updates() {
+    local frequency="$1"
+    local time="$2"
+    local component="$3"
+    
+    if [ -z "$frequency" ]; then
+        echo "❌ Error: Debes especificar una frecuencia"
+        echo "Frecuencias disponibles: daily, weekly, monthly"
+        return 1
+    fi
+    
+    if [ -z "$time" ]; then
+        time="02:00"
+    fi
+    
+    if [ -z "$component" ]; then
+        component="ALL"
+    fi
+    
+    echo "⏰ Programando actualizaciones automáticas:"
+    echo "  Frecuencia: $frequency"
+    echo "  Hora: $time"
+    echo "  Componente: $component"
+    
+    # Crear script de actualización programada
+    cat > "$HOME/.local/bin/mateos-scheduled-update" << EOF
+#!/bin/bash
+# Script de actualización programada de MateOS
+# Generado automáticamente el $(date)
+
+export MATEOS_PATH="$MATEOS_PATH"
+export MATEOS_AUTO_UPDATE="true"
+export MATEOS_UPDATE_COMPONENT="$component"
+
+# Ejecutar actualización
+"$MATEOS_PATH/bin/mateos-auto-update" apply "$component"
+EOF
+    
+    chmod +x "$HOME/.local/bin/mateos-scheduled-update"
+    
+    # Crear entrada de cron
+    local cron_entry=""
+    case "$frequency" in
+        "daily")
+            cron_entry="0 $(echo $time | cut -d: -f1) $(echo $time | cut -d: -f2) * * * $HOME/.local/bin/mateos-scheduled-update"
+            ;;
+        "weekly")
+            cron_entry="0 $(echo $time | cut -d: -f1) $(echo $time | cut -d: -f2) * * 0 $HOME/.local/bin/mateos-scheduled-update"
+            ;;
+        "monthly")
+            cron_entry="0 $(echo $time | cut -d: -f1) $(echo $time | cut -d: -f2) 1 * * $HOME/.local/bin/mateos-scheduled-update"
+            ;;
+    esac
+    
+    # Añadir a crontab
+    (crontab -l 2>/dev/null; echo "$cron_entry") | crontab -
+    
+    log_update "Scheduled updates: $frequency at $time for $component"
+    
+    echo "✅ Actualizaciones programadas exitosamente"
+}
+
+# Función para mostrar historial de actualizaciones
+show_history() {
+    local lines="${1:-50}"
+    
+    echo "📋 Historial de actualizaciones (últimas $lines líneas):"
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    
+    if [ -f "$UPDATE_LOG" ]; then
+        tail -n "$lines" "$UPDATE_LOG"
+    else
+        echo "No hay historial de actualizaciones"
+    fi
+}
+
+# Función principal
+case "$1" in
+    "check")
+        check_updates "$2"
+        ;;
+    "apply")
+        apply_updates "$2" "$3"
+        ;;
+    "monitor")
+        monitor_changes "$2" "$3"
+        ;;
+    "configure")
+        configure_auto_update "$2" "$3" "$4"
+        ;;
+    "schedule")
+        schedule_updates "$2" "$3" "$4"
+        ;;
+    "history")
+        show_history "$2"
+        ;;
+    *)
+        echo "🔄 MateOS Auto-Update System"
+        echo ""
+        echo "Uso: mateos-auto-update <comando> [argumentos]"
+        echo ""
+        echo "Comandos:"
+        echo "  check [componente]              - Verificar actualizaciones disponibles"
+        echo "  apply [componente] [force]      - Aplicar actualizaciones"
+        echo "  monitor [intervalo] [componente] - Monitorear cambios en tiempo real"
+        echo "  configure <habilitado> [intervalo] [componente] - Configurar auto-actualización"
+        echo "  schedule <frecuencia> [hora] [componente] - Programar actualizaciones"
+        echo "  history [líneas]                - Mostrar historial de actualizaciones"
+        echo ""
+        echo "Componentes disponibles: config, scripts, themes, ALL"
+        echo "Frecuencias: daily, weekly, monthly"
+        echo ""
+        echo "Ejemplos:"
+        echo "  mateos-auto-update check"
+        echo "  mateos-auto-update apply config"
+        echo "  mateos-auto-update monitor 30"
+        echo "  mateos-auto-update configure true 60 ALL"
+        echo "  mateos-auto-update schedule daily 02:00"
+        ;;
+esac

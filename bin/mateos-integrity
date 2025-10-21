@@ -1,0 +1,358 @@
+#!/bin/bash
+
+# MateOS Integrity Validation System
+# Sistema de validación de integridad de MateOS
+
+MATEOS_PATH="${MATEOS_PATH:-$HOME/.local/share/mateOS}"
+INTEGRITY_DIR="$HOME/.config/mateOS/integrity"
+CHECKSUM_FILE="$INTEGRITY_DIR/checksums.sha256"
+
+# Crear directorio de integridad
+mkdir -p "$INTEGRITY_DIR"
+
+# Función para generar checksums
+generate_checksums() {
+    local component="$1"
+    
+    if [ -z "$component" ]; then
+        echo "🔍 Generando checksums para todos los componentes..."
+        echo ""
+        
+        # Generar checksums para archivos críticos
+        local critical_files=(
+            "$MATEOS_PATH/config/mateos.conf"
+            "$MATEOS_PATH/config/mateos.env"
+            "$MATEOS_PATH/version"
+            "$MATEOS_PATH/README.md"
+            "$MATEOS_PATH/SETUP.md"
+        )
+        
+        # Generar checksums para scripts críticos
+        local critical_scripts=(
+            "mateos-config"
+            "mateos-profile"
+            "mateos-deps-install"
+            "mateos-backup-auto"
+            "mateos-log"
+            "mateos-verify"
+        )
+        
+        # Limpiar archivo de checksums
+        > "$CHECKSUM_FILE"
+        
+        # Generar checksums de archivos
+        for file in "${critical_files[@]}"; do
+            if [ -f "$file" ]; then
+                local checksum=$(sha256sum "$file" | cut -d' ' -f1)
+                echo "$checksum  $file" >> "$CHECKSUM_FILE"
+                echo "✅ $(basename "$file")"
+            fi
+        done
+        
+        # Generar checksums de scripts
+        for script in "${critical_scripts[@]}"; do
+            local script_path="$MATEOS_PATH/bin/$script"
+            if [ -f "$script_path" ]; then
+                local checksum=$(sha256sum "$script_path" | cut -d' ' -f1)
+                echo "$checksum  $script_path" >> "$CHECKSUM_FILE"
+                echo "✅ $script"
+            fi
+        done
+        
+        echo ""
+        echo "✅ Checksums generados y guardados en: $CHECKSUM_FILE"
+        
+    else
+        # Generar checksum para componente específico
+        local component_path=""
+        case "$component" in
+            "config")
+                component_path="$MATEOS_PATH/config"
+                ;;
+            "bin")
+                component_path="$MATEOS_PATH/bin"
+                ;;
+            "scripts")
+                component_path="$MATEOS_PATH/bin"
+                ;;
+            *)
+                echo "❌ Error: Componente desconocido: $component"
+                echo "Componentes disponibles: config, bin, scripts"
+                return 1
+                ;;
+        esac
+        
+        if [ -d "$component_path" ]; then
+            echo "🔍 Generando checksums para $component..."
+            find "$component_path" -type f -name "*.sh" -o -name "*.conf" -o -name "*.env" | while read file; do
+                local checksum=$(sha256sum "$file" | cut -d' ' -f1)
+                echo "$checksum  $file" >> "$CHECKSUM_FILE"
+                echo "✅ $(basename "$file")"
+            done
+        else
+            echo "❌ Error: Directorio no encontrado: $component_path"
+            return 1
+        fi
+    fi
+}
+
+# Función para verificar integridad
+verify_integrity() {
+    local component="$1"
+    local verbose="${2:-false}"
+    
+    if [ ! -f "$CHECKSUM_FILE" ]; then
+        echo "❌ Error: Archivo de checksums no encontrado"
+        echo "Ejecuta: mateos-integrity generate"
+        return 1
+    fi
+    
+    echo "🔍 Verificando integridad de MateOS..."
+    echo ""
+    
+    local errors=0
+    local verified=0
+    
+    if [ -z "$component" ]; then
+        # Verificar todos los archivos
+        while IFS= read -r line; do
+            if [ -n "$line" ]; then
+                local expected_checksum=$(echo "$line" | cut -d' ' -f1)
+                local file_path=$(echo "$line" | cut -d' ' -f3-)
+                
+                if [ -f "$file_path" ]; then
+                    local actual_checksum=$(sha256sum "$file_path" | cut -d' ' -f1)
+                    
+                    if [ "$expected_checksum" = "$actual_checksum" ]; then
+                        if [ "$verbose" = "true" ]; then
+                            echo "✅ $(basename "$file_path")"
+                        fi
+                        ((verified++))
+                    else
+                        echo "❌ $(basename "$file_path") - CHECKSUM MISMATCH"
+                        ((errors++))
+                    fi
+                else
+                    echo "⚠️  $(basename "$file_path") - ARCHIVO NO ENCONTRADO"
+                    ((errors++))
+                fi
+            fi
+        done < "$CHECKSUM_FILE"
+        
+    else
+        # Verificar componente específico
+        case "$component" in
+            "config")
+                grep "/config/" "$CHECKSUM_FILE" | while IFS= read -r line; do
+                    verify_file_integrity "$line" "$verbose"
+                done
+                ;;
+            "bin"|"scripts")
+                grep "/bin/" "$CHECKSUM_FILE" | while IFS= read -r line; do
+                    verify_file_integrity "$line" "$verbose"
+                done
+                ;;
+            *)
+                echo "❌ Error: Componente desconocido: $component"
+                return 1
+                ;;
+        esac
+    fi
+    
+    echo ""
+    echo "📊 Resumen de verificación:"
+    echo "  ✅ Verificados: $verified"
+    if [ $errors -gt 0 ]; then
+        echo "  ❌ Errores: $errors"
+        echo ""
+        echo "⚠️  Se detectaron modificaciones en archivos críticos"
+        echo "💡 Considera regenerar checksums: mateos-integrity generate"
+    else
+        echo "  ✅ Sin errores detectados"
+    fi
+}
+
+# Función para verificar archivo individual
+verify_file_integrity() {
+    local line="$1"
+    local verbose="$2"
+    
+    local expected_checksum=$(echo "$line" | cut -d' ' -f1)
+    local file_path=$(echo "$line" | cut -d' ' -f3-)
+    
+    if [ -f "$file_path" ]; then
+        local actual_checksum=$(sha256sum "$file_path" | cut -d' ' -f1)
+        
+        if [ "$expected_checksum" = "$actual_checksum" ]; then
+            if [ "$verbose" = "true" ]; then
+                echo "✅ $(basename "$file_path")"
+            fi
+        else
+            echo "❌ $(basename "$file_path") - CHECKSUM MISMATCH"
+        fi
+    else
+        echo "⚠️  $(basename "$file_path") - ARCHIVO NO ENCONTRADO"
+    fi
+}
+
+# Función para detectar cambios
+detect_changes() {
+    local days="${1:-1}"
+    
+    echo "🔍 Detectando cambios en los últimos $days días..."
+    echo ""
+    
+    local changes=0
+    
+    # Buscar archivos modificados
+    find "$MATEOS_PATH" -type f -mtime -$days -name "*.sh" -o -name "*.conf" -o -name "*.env" | while read file; do
+        echo "📝 Modificado: $(basename "$file") - $(stat -c %y "$file")"
+        ((changes++))
+    done
+    
+    if [ $changes -eq 0 ]; then
+        echo "✅ No se detectaron cambios en los últimos $days días"
+    else
+        echo ""
+        echo "📊 Total de archivos modificados: $changes"
+        echo "💡 Ejecuta verificación de integridad: mateos-integrity verify"
+    fi
+}
+
+# Función para restaurar archivos
+restore_file() {
+    local file_path="$1"
+    local backup_dir="$2"
+    
+    if [ -z "$file_path" ]; then
+        echo "❌ Error: Debes especificar la ruta del archivo"
+        return 1
+    fi
+    
+    if [ -z "$backup_dir" ]; then
+        backup_dir="$HOME/.config/mateOS/backups"
+    fi
+    
+    local file_name=$(basename "$file_path")
+    local backup_file=$(find "$backup_dir" -name "*$file_name*" -type f | head -1)
+    
+    if [ -z "$backup_file" ]; then
+        echo "❌ Error: No se encontró respaldo para $file_name"
+        return 1
+    fi
+    
+    echo "🔄 Restaurando $file_name desde respaldo..."
+    
+    # Crear respaldo del archivo actual
+    cp "$file_path" "$file_path.backup.$(date +%s)"
+    
+    # Restaurar desde respaldo
+    cp "$backup_file" "$file_path"
+    
+    echo "✅ Archivo restaurado: $file_name"
+    echo "📦 Respaldo del archivo actual guardado"
+}
+
+# Función para monitorear integridad
+monitor_integrity() {
+    local interval="${1:-300}"  # 5 minutos por defecto
+    
+    echo "👁️  Monitoreando integridad de MateOS (cada ${interval}s, Ctrl+C para salir)..."
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    
+    while true; do
+        local timestamp=$(date '+%H:%M:%S')
+        echo "[$timestamp] Verificando integridad..."
+        
+        # Verificar integridad silenciosamente
+        local errors=$(mateos-integrity verify 2>&1 | grep -c "❌\|⚠️")
+        
+        if [ $errors -gt 0 ]; then
+            echo "[$timestamp] ⚠️  Se detectaron $errors problemas de integridad"
+            mateos-log warn "Problemas de integridad detectados: $errors errores" "integrity"
+        else
+            echo "[$timestamp] ✅ Integridad verificada"
+        fi
+        
+        sleep "$interval"
+    done
+}
+
+# Función para generar reporte de integridad
+generate_report() {
+    local output_file="${1:-$INTEGRITY_DIR/integrity-report.txt}"
+    
+    echo "📋 Generando reporte de integridad..."
+    echo ""
+    
+    {
+        echo "MateOS Integrity Report"
+        echo "======================"
+        echo "Generated: $(date)"
+        echo "System: $(uname -a)"
+        echo "User: $(whoami)"
+        echo ""
+        
+        echo "File Integrity Status:"
+        echo "---------------------"
+        mateos-integrity verify verbose
+        
+        echo ""
+        echo "Recent Changes:"
+        echo "---------------"
+        mateos-integrity detect-changes 7
+        
+        echo ""
+        echo "System Information:"
+        echo "------------------"
+        echo "MateOS Version: $(cat "$MATEOS_PATH/version" 2>/dev/null || echo "Unknown")"
+        echo "Config Path: $MATEOS_PATH"
+        echo "Integrity Dir: $INTEGRITY_DIR"
+        
+    } > "$output_file"
+    
+    echo "✅ Reporte generado: $output_file"
+}
+
+# Función principal
+case "$1" in
+    "generate"|"gen")
+        generate_checksums "$2"
+        ;;
+    "verify"|"check")
+        verify_integrity "$2" "$3"
+        ;;
+    "detect-changes"|"changes")
+        detect_changes "$2"
+        ;;
+    "restore")
+        restore_file "$2" "$3"
+        ;;
+    "monitor")
+        monitor_integrity "$2"
+        ;;
+    "report")
+        generate_report "$2"
+        ;;
+    *)
+        echo "🔒 MateOS Integrity Validation System"
+        echo ""
+        echo "Uso: mateos-integrity <comando> [argumentos]"
+        echo ""
+        echo "Comandos:"
+        echo "  generate [componente]           - Generar checksums"
+        echo "  verify [componente] [verbose]     - Verificar integridad"
+        echo "  detect-changes [días]           - Detectar cambios recientes"
+        echo "  restore <archivo> [backup_dir]   - Restaurar archivo desde respaldo"
+        echo "  monitor [intervalo]             - Monitorear integridad continuamente"
+        echo "  report [archivo]                - Generar reporte de integridad"
+        echo ""
+        echo "Componentes disponibles: config, bin, scripts"
+        echo ""
+        echo "Ejemplos:"
+        echo "  mateos-integrity generate"
+        echo "  mateos-integrity verify verbose"
+        echo "  mateos-integrity detect-changes 3"
+        echo "  mateos-integrity monitor 600"
+        ;;
+esac

@@ -1,0 +1,426 @@
+#!/bin/bash
+
+# MateOS Audit System
+# Sistema de auditoría de MateOS
+
+MATEOS_PATH="${MATEOS_PATH:-$HOME/.local/share/mateOS}"
+AUDIT_DIR="$HOME/.local/state/mateOS/audit"
+AUDIT_LOG="$AUDIT_DIR/audit.log"
+AUDIT_CONFIG="$HOME/.config/mateOS/audit.conf"
+
+# Crear directorios necesarios
+mkdir -p "$AUDIT_DIR" "$(dirname "$AUDIT_CONFIG")"
+
+# Función para logging de auditoría
+audit_log() {
+    local event_type="$1"
+    local resource="$2"
+    local user="$3"
+    local action="$4"
+    local result="$5"
+    local details="$6"
+    local timestamp=$(date '+%Y-%m-%d %H:%M:%S')
+    local session_id="${AUDIT_SESSION_ID:-$(date +%s)}"
+    
+    echo "[$timestamp] [$session_id] $event_type:$resource:$user:$action:$result:$details" >> "$AUDIT_LOG"
+}
+
+# Función para configurar auditoría
+configure_audit() {
+    local event_type="$1"
+    local enabled="$2"
+    
+    if [ -z "$event_type" ]; then
+        echo "📋 Configuración actual de auditoría:"
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        
+        if [ -f "$AUDIT_CONFIG" ]; then
+            cat "$AUDIT_CONFIG"
+        else
+            echo "No hay configuración de auditoría"
+        fi
+        return
+    fi
+    
+    # Crear archivo de configuración si no existe
+    if [ ! -f "$AUDIT_CONFIG" ]; then
+        cat > "$AUDIT_CONFIG" << EOF
+# MateOS Audit Configuration
+# Configuración de auditoría de MateOS
+
+[system]
+audit_enabled = true
+audit_level = INFO
+retention_days = 90
+
+[events]
+login = true
+logout = true
+file_access = true
+config_change = true
+permission_change = true
+system_command = true
+error = true
+security = true
+
+[resources]
+mateOS_config = true
+mateOS_scripts = true
+system_files = false
+user_files = false
+
+[users]
+audit_all_users = true
+audit_specific_users = 
+
+[output]
+log_file = $AUDIT_LOG
+console_output = false
+email_alerts = false
+EOF
+    fi
+    
+    # Actualizar configuración
+    if [ "$enabled" = "true" ] || [ "$enabled" = "false" ]; then
+        sed -i "s/^$event_type = .*/$event_type = $enabled/" "$AUDIT_CONFIG"
+        echo "✅ Configuración actualizada: $event_type = $enabled"
+    else
+        echo "❌ Error: Valor debe ser 'true' o 'false'"
+        return 1
+    fi
+}
+
+# Función para auditar eventos del sistema
+audit_system_event() {
+    local event="$1"
+    local details="$2"
+    
+    audit_log "SYSTEM" "mateOS" "$USER" "$event" "SUCCESS" "$details"
+}
+
+# Función para auditar acceso a archivos
+audit_file_access() {
+    local file_path="$1"
+    local access_type="$2"
+    local result="$3"
+    
+    audit_log "FILE_ACCESS" "$file_path" "$USER" "$access_type" "$result" ""
+}
+
+# Función para auditar cambios de configuración
+audit_config_change() {
+    local config_file="$1"
+    local change_type="$2"
+    local old_value="$3"
+    local new_value="$4"
+    
+    local details="old:$old_value,new:$new_value"
+    audit_log "CONFIG_CHANGE" "$config_file" "$USER" "$change_type" "SUCCESS" "$details"
+}
+
+# Función para auditar cambios de permisos
+audit_permission_change() {
+    local resource="$1"
+    local permission="$2"
+    local old_state="$3"
+    local new_state="$4"
+    
+    local details="permission:$permission,old:$old_state,new:$new_state"
+    audit_log "PERMISSION_CHANGE" "$resource" "$USER" "MODIFY" "SUCCESS" "$details"
+}
+
+# Función para auditar comandos del sistema
+audit_system_command() {
+    local command="$1"
+    local arguments="$2"
+    local result="$3"
+    
+    local details="cmd:$command,args:$arguments"
+    audit_log "SYSTEM_COMMAND" "system" "$USER" "EXECUTE" "$result" "$details"
+}
+
+# Función para auditar eventos de seguridad
+audit_security_event() {
+    local event_type="$1"
+    local resource="$2"
+    local severity="$3"
+    local details="$4"
+    
+    audit_log "SECURITY" "$resource" "$USER" "$event_type" "$severity" "$details"
+}
+
+# Función para generar reporte de auditoría
+generate_audit_report() {
+    local start_date="$1"
+    local end_date="$2"
+    local output_file="$3"
+    
+    if [ -z "$start_date" ]; then
+        start_date=$(date -d "7 days ago" '+%Y-%m-%d')
+    fi
+    
+    if [ -z "$end_date" ]; then
+        end_date=$(date '+%Y-%m-%d')
+    fi
+    
+    if [ -z "$output_file" ]; then
+        output_file="$AUDIT_DIR/audit-report-$(date +%Y%m%d-%H%M%S).txt"
+    fi
+    
+    echo "📋 Generando reporte de auditoría ($start_date a $end_date)..."
+    echo ""
+    
+    {
+        echo "MateOS Audit Report"
+        echo "=================="
+        echo "Período: $start_date a $end_date"
+        echo "Generado: $(date)"
+        echo "Sistema: $(uname -a)"
+        echo "Usuario: $(whoami)"
+        echo ""
+        
+        echo "Resumen de Eventos:"
+        echo "-------------------"
+        
+        # Contar eventos por tipo
+        echo "Eventos del Sistema:"
+        grep "SYSTEM:" "$AUDIT_LOG" 2>/dev/null | wc -l | xargs echo "  Total:"
+        
+        echo "Accesos a Archivos:"
+        grep "FILE_ACCESS:" "$AUDIT_LOG" 2>/dev/null | wc -l | xargs echo "  Total:"
+        
+        echo "Cambios de Configuración:"
+        grep "CONFIG_CHANGE:" "$AUDIT_LOG" 2>/dev/null | wc -l | xargs echo "  Total:"
+        
+        echo "Cambios de Permisos:"
+        grep "PERMISSION_CHANGE:" "$AUDIT_LOG" 2>/dev/null | wc -l | xargs echo "  Total:"
+        
+        echo "Comandos del Sistema:"
+        grep "SYSTEM_COMMAND:" "$AUDIT_LOG" 2>/dev/null | wc -l | xargs echo "  Total:"
+        
+        echo "Eventos de Seguridad:"
+        grep "SECURITY:" "$AUDIT_LOG" 2>/dev/null | wc -l | xargs echo "  Total:"
+        
+        echo ""
+        echo "Eventos Recientes:"
+        echo "-----------------"
+        tail -n 50 "$AUDIT_LOG" 2>/dev/null || echo "No hay eventos registrados"
+        
+        echo ""
+        echo "Eventos de Seguridad:"
+        echo "--------------------"
+        grep "SECURITY:" "$AUDIT_LOG" 2>/dev/null | tail -n 20 || echo "No hay eventos de seguridad"
+        
+    } > "$output_file"
+    
+    echo "✅ Reporte generado: $output_file"
+}
+
+# Función para buscar en auditoría
+search_audit() {
+    local pattern="$1"
+    local event_type="$2"
+    local days="${3:-7}"
+    
+    if [ -z "$pattern" ]; then
+        echo "❌ Error: Debes especificar un patrón de búsqueda"
+        return 1
+    fi
+    
+    echo "🔍 Buscando '$pattern' en auditoría (últimos $days días):"
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    
+    local found=0
+    
+    if [ -n "$event_type" ]; then
+        grep "$event_type:" "$AUDIT_LOG" 2>/dev/null | grep "$pattern" | while read line; do
+            echo "  $line"
+            found=1
+        done
+    else
+        grep "$pattern" "$AUDIT_LOG" 2>/dev/null | while read line; do
+            echo "  $line"
+            found=1
+        done
+    fi
+    
+    if [ $found -eq 0 ]; then
+        echo "  No se encontraron coincidencias"
+    fi
+}
+
+# Función para limpiar auditoría
+clean_audit() {
+    local days="${1:-90}"
+    local confirm="${2:-false}"
+    
+    if [ "$confirm" != "true" ]; then
+        echo "⚠️  ¿Estás seguro de que quieres limpiar registros de auditoría de más de $days días?"
+        echo "Esta acción no se puede deshacer."
+        read -p "Escribe 'yes' para confirmar: " confirm_input
+        
+        if [ "$confirm_input" != "yes" ]; then
+            echo "❌ Operación cancelada"
+            return 1
+        fi
+    fi
+    
+    # Crear respaldo antes de limpiar
+    cp "$AUDIT_LOG" "$AUDIT_LOG.backup.$(date +%s)"
+    
+    # Limpiar registros antiguos
+    awk -v days="$days" '
+    BEGIN {
+        cutoff = systime() - (days * 24 * 60 * 60)
+    }
+    {
+        # Extraer timestamp de la línea
+        if (match($0, /\[([0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}:[0-9]{2})\]/)) {
+            timestamp = substr($0, RSTART+1, RLENGTH-2)
+            gsub(/[-: ]/, " ", timestamp)
+            event_time = mktime(timestamp)
+            
+            if (event_time > cutoff) {
+                print $0
+            }
+        }
+    }
+    ' "$AUDIT_LOG" > "$AUDIT_LOG.tmp" && mv "$AUDIT_LOG.tmp" "$AUDIT_LOG"
+    
+    echo "✅ Auditoría limpiada (registros de más de $days días eliminados)"
+}
+
+# Función para monitorear auditoría
+monitor_audit() {
+    local event_type="${1:-ALL}"
+    local lines="${2:-50}"
+    
+    echo "👁️  Monitoreando auditoría (Ctrl+C para salir):"
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    
+    if [ "$event_type" = "ALL" ]; then
+        tail -f "$AUDIT_LOG"
+    else
+        tail -f "$AUDIT_LOG" | grep "$event_type:"
+    fi
+}
+
+# Función para exportar auditoría
+export_audit() {
+    local format="$1"
+    local output_file="$2"
+    
+    if [ -z "$format" ]; then
+        format="txt"
+    fi
+    
+    if [ -z "$output_file" ]; then
+        output_file="$AUDIT_DIR/audit-export-$(date +%Y%m%d-%H%M%S).$format"
+    fi
+    
+    case "$format" in
+        "txt")
+            cp "$AUDIT_LOG" "$output_file"
+            ;;
+        "csv")
+            awk -F: '{
+                print $1 "," $2 "," $3 "," $4 "," $5 "," $6 "," $7
+            }' "$AUDIT_LOG" > "$output_file"
+            ;;
+        "json")
+            awk -F: '{
+                print "{"
+                print "  \"timestamp\": \"" $1 "\","
+                print "  \"session_id\": \"" $2 "\","
+                print "  \"event_type\": \"" $3 "\","
+                print "  \"resource\": \"" $4 "\","
+                print "  \"user\": \"" $5 "\","
+                print "  \"action\": \"" $6 "\","
+                print "  \"result\": \"" $7 "\","
+                print "  \"details\": \"" $8 "\""
+                print "},"
+            }' "$AUDIT_LOG" > "$output_file"
+            ;;
+        *)
+            echo "❌ Error: Formato no soportado: $format"
+            echo "Formatos disponibles: txt, csv, json"
+            return 1
+            ;;
+    esac
+    
+    echo "✅ Auditoría exportada: $output_file"
+}
+
+# Función principal
+case "$1" in
+    "log")
+        audit_log "$2" "$3" "$4" "$5" "$6" "$7"
+        ;;
+    "configure"|"config")
+        configure_audit "$2" "$3"
+        ;;
+    "system")
+        audit_system_event "$2" "$3"
+        ;;
+    "file")
+        audit_file_access "$2" "$3" "$4"
+        ;;
+    "config")
+        audit_config_change "$2" "$3" "$4" "$5"
+        ;;
+    "permission")
+        audit_permission_change "$2" "$3" "$4" "$5"
+        ;;
+    "command")
+        audit_system_command "$2" "$3" "$4"
+        ;;
+    "security")
+        audit_security_event "$2" "$3" "$4" "$5"
+        ;;
+    "report")
+        generate_audit_report "$2" "$3" "$4"
+        ;;
+    "search")
+        search_audit "$2" "$3" "$4"
+        ;;
+    "clean")
+        clean_audit "$2" "$3"
+        ;;
+    "monitor")
+        monitor_audit "$2" "$3"
+        ;;
+    "export")
+        export_audit "$2" "$3"
+        ;;
+    *)
+        echo "🔍 MateOS Audit System"
+        echo ""
+        echo "Uso: mateos-audit <comando> [argumentos]"
+        echo ""
+        echo "Comandos de auditoría:"
+        echo "  log <tipo> <recurso> <usuario> <acción> <resultado> <detalles> - Log manual"
+        echo "  configure [evento] [habilitado]                              - Configurar auditoría"
+        echo "  system <evento> <detalles>                                   - Auditar evento del sistema"
+        echo "  file <archivo> <tipo_acceso> <resultado>                      - Auditar acceso a archivo"
+        echo "  config <archivo> <tipo_cambio> <valor_anterior> <valor_nuevo> - Auditar cambio de configuración"
+        echo "  permission <recurso> <permiso> <estado_anterior> <estado_nuevo> - Auditar cambio de permisos"
+        echo "  command <comando> <argumentos> <resultado>                    - Auditar comando del sistema"
+        echo "  security <tipo_evento> <recurso> <severidad> <detalles>       - Auditar evento de seguridad"
+        echo ""
+        echo "Comandos de gestión:"
+        echo "  report [fecha_inicio] [fecha_fin] [archivo]                  - Generar reporte"
+        echo "  search <patrón> [tipo_evento] [días]                         - Buscar en auditoría"
+        echo "  clean [días] [confirm]                                       - Limpiar registros antiguos"
+        echo "  monitor [tipo_evento] [líneas]                              - Monitorear en tiempo real"
+        echo "  export [formato] [archivo]                                   - Exportar auditoría"
+        echo ""
+        echo "Formatos de exportación: txt, csv, json"
+        echo ""
+        echo "Ejemplos:"
+        echo "  mateos-audit system 'config_loaded' 'MateOS iniciado'"
+        echo "  mateos-audit file '/etc/mateOS.conf' 'read' 'success'"
+        echo "  mateos-audit security 'unauthorized_access' '/etc/' 'HIGH' 'Intento de acceso no autorizado'"
+        echo "  mateos-audit report '2024-01-01' '2024-01-31'"
+        echo "  mateos-audit export csv"
+        ;;
+esac
