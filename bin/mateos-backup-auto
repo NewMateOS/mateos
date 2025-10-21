@@ -1,0 +1,370 @@
+#!/bin/bash
+
+# MateOS Automatic Backup System
+# Sistema de respaldo automático de MateOS
+
+MATEOS_PATH="${MATEOS_PATH:-$HOME/.local/share/mateOS}"
+BACKUP_DIR="$HOME/.config/mateOS/backups"
+LOG_FILE="$HOME/.local/state/mateOS/logs/backup.log"
+
+# Crear directorios necesarios
+mkdir -p "$BACKUP_DIR" "$(dirname "$LOG_FILE")"
+
+# Función para logging
+log() {
+    local message="$1"
+    local timestamp=$(date '+%Y-%m-%d %H:%M:%S')
+    echo "[$timestamp] $message" >> "$LOG_FILE"
+}
+
+# Función para crear respaldo
+create_backup() {
+    local backup_name="mateOS-backup-$(date +%Y%m%d-%H%M%S)"
+    local backup_path="$BACKUP_DIR/$backup_name"
+    
+    log "Iniciando respaldo: $backup_name"
+    
+    # Crear directorio de respaldo
+    mkdir -p "$backup_path"
+    
+    # Respaldar configuraciones de MateOS
+    if [ -d "$HOME/.config/mateOS" ]; then
+        cp -r "$HOME/.config/mateOS" "$backup_path/"
+        log "Configuraciones de MateOS respaldadas"
+    fi
+    
+    # Respaldar configuraciones de Hyprland
+    if [ -d "$HOME/.config/hypr" ]; then
+        cp -r "$HOME/.config/hypr" "$backup_path/"
+        log "Configuraciones de Hyprland respaldadas"
+    fi
+    
+    # Respaldar configuraciones de Waybar
+    if [ -d "$HOME/.config/waybar" ]; then
+        cp -r "$HOME/.config/waybar" "$backup_path/"
+        log "Configuraciones de Waybar respaldadas"
+    fi
+    
+    # Respaldar configuraciones de Kitty
+    if [ -d "$HOME/.config/kitty" ]; then
+        cp -r "$HOME/.config/kitty" "$backup_path/"
+        log "Configuraciones de Kitty respaldadas"
+    fi
+    
+    # Respaldar configuraciones de SwayOSD
+    if [ -d "$HOME/.config/swayosd" ]; then
+        cp -r "$HOME/.config/swayosd" "$backup_path/"
+        log "Configuraciones de SwayOSD respaldadas"
+    fi
+    
+    # Respaldar configuraciones de Walker
+    if [ -d "$HOME/.config/walker" ]; then
+        cp -r "$HOME/.config/walker" "$backup_path/"
+        log "Configuraciones de Walker respaldadas"
+    fi
+    
+    # Respaldar configuraciones de Fontconfig
+    if [ -d "$HOME/.config/fontconfig" ]; then
+        cp -r "$HOME/.config/fontconfig" "$backup_path/"
+        log "Configuraciones de Fontconfig respaldadas"
+    fi
+    
+    # Respaldar configuraciones de Starship
+    if [ -f "$HOME/.config/starship.toml" ]; then
+        cp "$HOME/.config/starship.toml" "$backup_path/"
+        log "Configuración de Starship respaldada"
+    fi
+    
+    # Respaldar flags de navegadores
+    for flag_file in chromium-flags.conf brave-flags.conf; do
+        if [ -f "$HOME/.config/$flag_file" ]; then
+            cp "$HOME/.config/$flag_file" "$backup_path/"
+            log "Flags de navegador $flag_file respaldados"
+        fi
+    done
+    
+    # Respaldar servicios systemd
+    if [ -d "$HOME/.config/systemd/user" ]; then
+        cp -r "$HOME/.config/systemd/user" "$backup_path/"
+        log "Servicios systemd respaldados"
+    fi
+    
+    # Crear archivo de información del respaldo
+    cat > "$backup_path/backup-info.txt" << EOF
+MateOS Backup Information
+========================
+Backup Name: $backup_name
+Created: $(date)
+MateOS Version: $(cat "$MATEOS_PATH/version" 2>/dev/null || echo "Unknown")
+System: $(uname -a)
+User: $(whoami)
+Home: $HOME
+
+Backup Contents:
+- MateOS configurations
+- Hyprland configurations
+- Waybar configurations
+- Kitty configurations
+- SwayOSD configurations
+- Walker configurations
+- Fontconfig configurations
+- Starship configuration
+- Browser flags
+- Systemd services
+EOF
+    
+    # Comprimir respaldo si está habilitado
+    if [ "$MATEOS_BACKUP_COMPRESS" = "true" ]; then
+        log "Comprimiendo respaldo..."
+        cd "$BACKUP_DIR"
+        tar -czf "${backup_name}.tar.gz" "$backup_name"
+        rm -rf "$backup_name"
+        log "Respaldo comprimido: ${backup_name}.tar.gz"
+    fi
+    
+    log "Respaldo completado: $backup_name"
+    echo "$backup_name"
+}
+
+# Función para limpiar respaldos antiguos
+cleanup_old_backups() {
+    local max_backups="${MATEOS_BACKUP_MAX:-10}"
+    local retention_days="${MATEOS_BACKUP_RETENTION_DAYS:-30}"
+    
+    log "Limpiando respaldos antiguos (máximo: $max_backups, retención: $retention_days días)"
+    
+    # Limpiar por número de respaldos
+    local backup_count=$(ls -1 "$BACKUP_DIR" 2>/dev/null | wc -l)
+    if [ "$backup_count" -gt "$max_backups" ]; then
+        local to_remove=$((backup_count - max_backups))
+        log "Eliminando $to_remove respaldos antiguos por límite de cantidad"
+        
+        ls -1t "$BACKUP_DIR" | tail -n "$to_remove" | while read backup; do
+            rm -rf "$BACKUP_DIR/$backup"
+            log "Respaldo eliminado: $backup"
+        done
+    fi
+    
+    # Limpiar por antigüedad
+    find "$BACKUP_DIR" -type d -mtime +$retention_days -exec rm -rf {} \; 2>/dev/null
+    find "$BACKUP_DIR" -name "*.tar.gz" -mtime +$retention_days -delete 2>/dev/null
+    
+    log "Limpieza de respaldos completada"
+}
+
+# Función para restaurar respaldo
+restore_backup() {
+    local backup_name="$1"
+    
+    if [ -z "$backup_name" ]; then
+        echo "❌ Error: Debes especificar un nombre de respaldo"
+        echo "Uso: mateos-backup-auto restore <nombre>"
+        exit 1
+    fi
+    
+    local backup_path="$BACKUP_DIR/$backup_name"
+    
+    if [ ! -d "$backup_path" ]; then
+        echo "❌ Error: Respaldo '$backup_name' no encontrado"
+        exit 1
+    fi
+    
+    log "Restaurando respaldo: $backup_name"
+    
+    # Crear respaldo de la configuración actual antes de restaurar
+    local current_backup="mateOS-current-$(date +%Y%m%d-%H%M%S)"
+    create_backup "$current_backup"
+    log "Respaldo de configuración actual creado: $current_backup"
+    
+    # Restaurar configuraciones
+    if [ -d "$backup_path/mateOS" ]; then
+        cp -r "$backup_path/mateOS" "$HOME/.config/"
+        log "Configuraciones de MateOS restauradas"
+    fi
+    
+    if [ -d "$backup_path/hypr" ]; then
+        cp -r "$backup_path/hypr" "$HOME/.config/"
+        log "Configuraciones de Hyprland restauradas"
+    fi
+    
+    if [ -d "$backup_path/waybar" ]; then
+        cp -r "$backup_path/waybar" "$HOME/.config/"
+        log "Configuraciones de Waybar restauradas"
+    fi
+    
+    if [ -d "$backup_path/kitty" ]; then
+        cp -r "$backup_path/kitty" "$HOME/.config/"
+        log "Configuraciones de Kitty restauradas"
+    fi
+    
+    if [ -d "$backup_path/swayosd" ]; then
+        cp -r "$backup_path/swayosd" "$HOME/.config/"
+        log "Configuraciones de SwayOSD restauradas"
+    fi
+    
+    if [ -d "$backup_path/walker" ]; then
+        cp -r "$backup_path/walker" "$HOME/.config/"
+        log "Configuraciones de Walker restauradas"
+    fi
+    
+    if [ -d "$backup_path/fontconfig" ]; then
+        cp -r "$backup_path/fontconfig" "$HOME/.config/"
+        log "Configuraciones de Fontconfig restauradas"
+    fi
+    
+    if [ -f "$backup_path/starship.toml" ]; then
+        cp "$backup_path/starship.toml" "$HOME/.config/"
+        log "Configuración de Starship restaurada"
+    fi
+    
+    # Restaurar flags de navegadores
+    for flag_file in chromium-flags.conf brave-flags.conf; do
+        if [ -f "$backup_path/$flag_file" ]; then
+            cp "$backup_path/$flag_file" "$HOME/.config/"
+            log "Flags de navegador $flag_file restaurados"
+        fi
+    done
+    
+    # Restaurar servicios systemd
+    if [ -d "$backup_path/user" ]; then
+        cp -r "$backup_path/user" "$HOME/.config/systemd/"
+        systemctl --user daemon-reload
+        log "Servicios systemd restaurados"
+    fi
+    
+    log "Respaldo restaurado exitosamente: $backup_name"
+    echo "✅ Respaldo restaurado: $backup_name"
+    echo "🔄 Reinicia tu sesión para aplicar los cambios"
+}
+
+# Función para listar respaldos
+list_backups() {
+    echo "📦 Respaldos disponibles:"
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    
+    if [ ! -d "$BACKUP_DIR" ] || [ -z "$(ls -A "$BACKUP_DIR" 2>/dev/null)" ]; then
+        echo "  No hay respaldos disponibles"
+        return
+    fi
+    
+    ls -1t "$BACKUP_DIR" | while read backup; do
+        local backup_path="$BACKUP_DIR/$backup"
+        local size=""
+        local date=""
+        
+        if [ -d "$backup_path" ]; then
+            size=$(du -sh "$backup_path" 2>/dev/null | cut -f1)
+            date=$(stat -c %y "$backup_path" 2>/dev/null | cut -d' ' -f1)
+        elif [ -f "$backup_path.tar.gz" ]; then
+            size=$(du -sh "$backup_path.tar.gz" 2>/dev/null | cut -f1)
+            date=$(stat -c %y "$backup_path.tar.gz" 2>/dev/null | cut -d' ' -f1)
+        fi
+        
+        echo "  📁 $backup ($size) - $date"
+    done
+}
+
+# Función para programar respaldo automático
+schedule_backup() {
+    local frequency="$1"
+    local time="$2"
+    
+    if [ -z "$frequency" ]; then
+        frequency="daily"
+    fi
+    
+    if [ -z "$time" ]; then
+        time="02:00"
+    fi
+    
+    log "Programando respaldo automático: $frequency a las $time"
+    
+    # Crear script de respaldo
+    cat > "$HOME/.local/bin/mateos-backup-scheduled" << EOF
+#!/bin/bash
+# Script de respaldo automático de MateOS
+# Generado automáticamente el $(date)
+
+export MATEOS_PATH="$MATEOS_PATH"
+export MATEOS_BACKUP_AUTO="true"
+export MATEOS_BACKUP_FREQUENCY="$frequency"
+export MATEOS_BACKUP_TIME="$time"
+export MATEOS_BACKUP_MAX="10"
+export MATEOS_BACKUP_COMPRESS="true"
+
+# Ejecutar respaldo
+"$MATEOS_PATH/bin/mateos-backup-auto" create
+EOF
+    
+    chmod +x "$HOME/.local/bin/mateos-backup-scheduled"
+    
+    # Crear entrada de cron
+    local cron_entry=""
+    case "$frequency" in
+        "daily")
+            cron_entry="0 $(echo $time | cut -d: -f1) $(echo $time | cut -d: -f2) * * * $HOME/.local/bin/mateos-backup-scheduled"
+            ;;
+        "weekly")
+            cron_entry="0 $(echo $time | cut -d: -f1) $(echo $time | cut -d: -f2) * * 0 $HOME/.local/bin/mateos-backup-scheduled"
+            ;;
+        "monthly")
+            cron_entry="0 $(echo $time | cut -d: -f1) $(echo $time | cut -d: -f2) 1 * * $HOME/.local/bin/mateos-backup-scheduled"
+            ;;
+    esac
+    
+    # Añadir a crontab
+    (crontab -l 2>/dev/null; echo "$cron_entry") | crontab -
+    
+    log "Respaldo automático programado: $frequency a las $time"
+    echo "✅ Respaldo automático programado: $frequency a las $time"
+}
+
+# Función principal
+case "$1" in
+    "create")
+        create_backup
+        ;;
+    "restore")
+        restore_backup "$2"
+        ;;
+    "list"|"ls")
+        list_backups
+        ;;
+    "cleanup")
+        cleanup_old_backups
+        ;;
+    "schedule")
+        schedule_backup "$2" "$3"
+        ;;
+    "auto")
+        # Ejecutar respaldo automático
+        if [ "$MATEOS_BACKUP_AUTO" = "true" ]; then
+            create_backup
+            cleanup_old_backups
+        fi
+        ;;
+    *)
+        echo "📦 MateOS Automatic Backup System"
+        echo ""
+        echo "Uso: mateos-backup-auto <comando> [argumentos]"
+        echo ""
+        echo "Comandos:"
+        echo "  create                 - Crear respaldo manual"
+        echo "  restore <nombre>        - Restaurar respaldo"
+        echo "  list, ls               - Listar respaldos disponibles"
+        echo "  cleanup                - Limpiar respaldos antiguos"
+        echo "  schedule <freq> <time> - Programar respaldo automático"
+        echo "  auto                   - Ejecutar respaldo automático"
+        echo ""
+        echo "Frecuencias disponibles:"
+        echo "  daily                  - Diario"
+        echo "  weekly                 - Semanal"
+        echo "  monthly                - Mensual"
+        echo ""
+        echo "Ejemplos:"
+        echo "  mateos-backup-auto create"
+        echo "  mateos-backup-auto restore mateOS-backup-20241201-143022"
+        echo "  mateos-backup-auto schedule daily 02:00"
+        echo "  mateos-backup-auto list"
+        ;;
+esac

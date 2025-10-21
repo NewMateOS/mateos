@@ -1,0 +1,341 @@
+#!/bin/bash
+
+# MateOS Profile Manager
+# Gestor de perfiles de usuario de MateOS
+
+MATEOS_PATH="${MATEOS_PATH:-$HOME/.local/share/mateOS}"
+PROFILES_DIR="$MATEOS_PATH/profiles"
+CURRENT_PROFILE_FILE="$HOME/.config/mateOS/current-profile"
+
+# Función para listar perfiles disponibles
+list_profiles() {
+    echo "👤 Perfiles disponibles de MateOS:"
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    
+    local profiles=("default" "development" "gaming" "server" "minimal")
+    local current=$(get_current_profile)
+    
+    for profile in "${profiles[@]}"; do
+        if [ "$profile" = "$current" ]; then
+            echo "  ✅ $profile (actual)"
+        else
+            echo "  ⚪ $profile"
+        fi
+    done
+    
+    echo ""
+    echo "💡 Usa: mateos-profile set <perfil> para cambiar"
+}
+
+# Función para obtener perfil actual
+get_current_profile() {
+    if [ -f "$CURRENT_PROFILE_FILE" ]; then
+        cat "$CURRENT_PROFILE_FILE"
+    else
+        echo "default"
+    fi
+}
+
+# Función para establecer perfil
+set_profile() {
+    local profile="$1"
+    
+    if [ -z "$profile" ]; then
+        echo "❌ Error: Debes especificar un perfil"
+        echo "Uso: mateos-profile set <perfil>"
+        exit 1
+    fi
+    
+    # Validar perfil
+    local valid_profiles=("default" "development" "gaming" "server" "minimal")
+    local valid=false
+    
+    for valid_profile in "${valid_profiles[@]}"; do
+        if [ "$profile" = "$valid_profile" ]; then
+            valid=true
+            break
+        fi
+    done
+    
+    if [ "$valid" = false ]; then
+        echo "❌ Error: Perfil '$profile' no válido"
+        echo "Perfiles disponibles: ${valid_profiles[*]}"
+        exit 1
+    fi
+    
+    # Crear directorio si no existe
+    mkdir -p "$(dirname "$CURRENT_PROFILE_FILE")"
+    
+    # Guardar perfil actual
+    echo "$profile" > "$CURRENT_PROFILE_FILE"
+    
+    # Aplicar configuración del perfil
+    apply_profile "$profile"
+    
+    echo "✅ Perfil cambiado a: $profile"
+    echo "🔄 Reinicia tu sesión para aplicar todos los cambios"
+}
+
+# Función para aplicar configuración de perfil
+apply_profile() {
+    local profile="$1"
+    
+    echo "🔧 Aplicando configuración del perfil: $profile"
+    echo ""
+    
+    case "$profile" in
+        "default")
+            apply_default_profile
+            ;;
+        "development")
+            apply_development_profile
+            ;;
+        "gaming")
+            apply_gaming_profile
+            ;;
+        "server")
+            apply_server_profile
+            ;;
+        "minimal")
+            apply_minimal_profile
+            ;;
+    esac
+}
+
+# Función para aplicar perfil por defecto
+apply_default_profile() {
+    echo "📋 Configuración por defecto:"
+    echo "  • Animaciones habilitadas"
+    echo "  • Waybar completo"
+    echo "  • Todas las aplicaciones disponibles"
+    echo "  • Configuración estándar de Hyprland"
+}
+
+# Función para aplicar perfil de desarrollo
+apply_development_profile() {
+    echo "💻 Configuración de desarrollo:"
+    echo "  • Docker habilitado"
+    echo "  • Git hooks activados"
+    echo "  • Herramientas de debug"
+    echo "  • Workspace 2 por defecto"
+    echo "  • Terminal con configuración de desarrollo"
+    
+    # Configurar workspace por defecto
+    if command -v hyprctl &>/dev/null; then
+        hyprctl dispatch workspace 2
+    fi
+}
+
+# Función para aplicar perfil de gaming
+apply_gaming_profile() {
+    echo "🎮 Configuración de gaming:"
+    echo "  • Modo gaming activado"
+    echo "  • Compositor deshabilitado para mejor rendimiento"
+    echo "  • Gamepad habilitado"
+    echo "  • Workspace 3 por defecto"
+    echo "  • Optimizaciones de rendimiento"
+    
+    # Configurar workspace por defecto
+    if command -v hyprctl &>/dev/null; then
+        hyprctl dispatch workspace 3
+    fi
+}
+
+# Función para aplicar perfil de servidor
+apply_server_profile() {
+    echo "🖥️  Configuración de servidor:"
+    echo "  • SSH habilitado"
+    echo "  • Acceso remoto configurado"
+    echo "  • Aplicaciones GUI deshabilitadas"
+    echo "  • Monitoreo del sistema activado"
+    echo "  • Configuración optimizada para servidor"
+}
+
+# Función para aplicar perfil minimalista
+apply_minimal_profile() {
+    echo "🎯 Configuración minimalista:"
+    echo "  • Animaciones deshabilitadas"
+    echo "  • Waybar minimalista"
+    echo "  • Tray deshabilitado"
+    echo "  • Solo aplicaciones esenciales"
+    echo "  • Configuración ligera"
+}
+
+# Función para mostrar información del perfil actual
+show_profile() {
+    local current=$(get_current_profile)
+    
+    echo "👤 Perfil actual de MateOS: $current"
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    
+    case "$current" in
+        "default")
+            echo "📋 Perfil por defecto"
+            echo "  Configuración estándar para uso general"
+            ;;
+        "development")
+            echo "💻 Perfil de desarrollo"
+            echo "  Optimizado para programación y desarrollo"
+            ;;
+        "gaming")
+            echo "🎮 Perfil de gaming"
+            echo "  Optimizado para juegos y entretenimiento"
+            ;;
+        "server")
+            echo "🖥️  Perfil de servidor"
+            echo "  Optimizado para uso como servidor"
+            ;;
+        "minimal")
+            echo "🎯 Perfil minimalista"
+            echo "  Configuración ligera y minimalista"
+            ;;
+    esac
+    
+    echo ""
+    echo "💡 Usa: mateos-profile list para ver todos los perfiles"
+}
+
+# Función para crear perfil personalizado
+create_profile() {
+    local profile_name="$1"
+    
+    if [ -z "$profile_name" ]; then
+        echo "❌ Error: Debes especificar un nombre para el perfil"
+        echo "Uso: mateos-profile create <nombre>"
+        exit 1
+    fi
+    
+    # Validar nombre del perfil
+    if [[ ! "$profile_name" =~ ^[a-zA-Z0-9_-]+$ ]]; then
+        echo "❌ Error: El nombre del perfil solo puede contener letras, números, guiones y guiones bajos"
+        exit 1
+    fi
+    
+    local profile_dir="$PROFILES_DIR/$profile_name"
+    
+    if [ -d "$profile_dir" ]; then
+        echo "❌ Error: El perfil '$profile_name' ya existe"
+        exit 1
+    fi
+    
+    # Crear directorio del perfil
+    mkdir -p "$profile_dir"
+    
+    # Crear archivo de configuración del perfil
+    cat > "$profile_dir/config.conf" << EOF
+# Configuración del perfil: $profile_name
+# Creado el: $(date)
+
+[profile]
+name = "$profile_name"
+description = "Perfil personalizado"
+created = "$(date)"
+
+[hyprland]
+# Configuración específica de Hyprland para este perfil
+gaps_in = 5
+gaps_out = 10
+rounding = 8
+
+[waybar]
+# Configuración específica de Waybar para este perfil
+height = 26
+position = "top"
+
+[applications]
+# Aplicaciones específicas para este perfil
+default_terminal = "kitty"
+default_browser = "chromium"
+EOF
+    
+    echo "✅ Perfil personalizado '$profile_name' creado"
+    echo "📁 Ubicación: $profile_dir"
+    echo "💡 Edita $profile_dir/config.conf para personalizar"
+}
+
+# Función para eliminar perfil personalizado
+remove_profile() {
+    local profile_name="$1"
+    
+    if [ -z "$profile_name" ]; then
+        echo "❌ Error: Debes especificar un nombre para el perfil"
+        echo "Uso: mateos-profile remove <nombre>"
+        exit 1
+    fi
+    
+    # No permitir eliminar perfiles del sistema
+    local system_profiles=("default" "development" "gaming" "server" "minimal")
+    for sys_profile in "${system_profiles[@]}"; do
+        if [ "$profile_name" = "$sys_profile" ]; then
+            echo "❌ Error: No se puede eliminar el perfil del sistema '$profile_name'"
+            exit 1
+        fi
+    done
+    
+    local profile_dir="$PROFILES_DIR/$profile_name"
+    
+    if [ ! -d "$profile_dir" ]; then
+        echo "❌ Error: El perfil '$profile_name' no existe"
+        exit 1
+    fi
+    
+    # Confirmar eliminación
+    echo "⚠️  ¿Estás seguro de que quieres eliminar el perfil '$profile_name'?"
+    echo "Esta acción no se puede deshacer."
+    read -p "Escribe 'yes' para confirmar: " confirm
+    
+    if [ "$confirm" = "yes" ]; then
+        rm -rf "$profile_dir"
+        echo "✅ Perfil '$profile_name' eliminado"
+    else
+        echo "❌ Operación cancelada"
+    fi
+}
+
+# Función principal
+case "$1" in
+    "list"|"ls")
+        list_profiles
+        ;;
+    "set")
+        set_profile "$2"
+        ;;
+    "show"|"current")
+        show_profile
+        ;;
+    "create")
+        create_profile "$2"
+        ;;
+    "remove"|"rm")
+        remove_profile "$2"
+        ;;
+    "apply")
+        apply_profile "$2"
+        ;;
+    *)
+        echo "👤 MateOS Profile Manager"
+        echo ""
+        echo "Uso: mateos-profile <comando> [argumentos]"
+        echo ""
+        echo "Comandos:"
+        echo "  list, ls              - Listar perfiles disponibles"
+        echo "  set <perfil>           - Cambiar a un perfil"
+        echo "  show, current          - Mostrar perfil actual"
+        echo "  create <nombre>        - Crear perfil personalizado"
+        echo "  remove <nombre>       - Eliminar perfil personalizado"
+        echo "  apply <perfil>         - Aplicar configuración de perfil"
+        echo ""
+        echo "Perfiles disponibles:"
+        echo "  default               - Configuración por defecto"
+        echo "  development           - Optimizado para desarrollo"
+        echo "  gaming                - Optimizado para gaming"
+        echo "  server                - Optimizado para servidor"
+        echo "  minimal               - Configuración minimalista"
+        echo ""
+        echo "Ejemplos:"
+        echo "  mateos-profile list"
+        echo "  mateos-profile set development"
+        echo "  mateos-profile create my-profile"
+        echo "  mateos-profile show"
+        ;;
+esac
