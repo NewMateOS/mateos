@@ -1,0 +1,416 @@
+#!/bin/bash
+
+# MateOS Command Manager v2.0
+# Sistema mejorado de gestión de comandos con autocompletación, caché y búsqueda fuzzy
+
+MATEOS_PATH="${MATEOS_PATH:-$HOME/.local/share/mateOS}"
+COMMAND_CACHE="$HOME/.cache/mateos/commands.json"
+COMMAND_INDEX="$HOME/.cache/mateos/index.json"
+CACHE_DIR="$HOME/.cache/mateos"
+
+# Crear directorio de caché
+mkdir -p "$CACHE_DIR"
+
+# Categorías con prioridad (orden de búsqueda)
+declare -A CATEGORY_PRIORITY=(
+    ["system"]=1
+    ["apps"]=2
+    ["packages"]=3
+    ["themes"]=4
+    ["dev"]=5
+    ["webapps"]=6
+    ["utils"]=7
+)
+
+# Colores para output
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+PURPLE='\033[0;35m'
+CYAN='\033[0;36m'
+NC='\033[0m' # No Color
+
+# Función para logging
+log_debug() {
+    if [ "${MATEOS_DEBUG:-false}" = "true" ]; then
+        echo -e "${BLUE}[DEBUG]${NC} $1" >&2
+    fi
+}
+
+# Función para construir índice de comandos
+build_command_index() {
+    echo -e "${CYAN}🔍 Construyendo índice de comandos...${NC}"
+    mkdir -p "$CACHE_DIR"
+    
+    # Crear índice JSON con metadatos completos
+    cat > "$COMMAND_INDEX" << 'EOF'
+{
+  "version": "2.0",
+  "last_updated": "",
+  "commands": {
+EOF
+
+    local first=true
+    local total_commands=0
+    
+    # Procesar cada categoría en orden de prioridad
+    for category in system apps packages themes dev webapps utils; do
+        if [ -d "$MATEOS_PATH/bin/$category" ]; then
+            log_debug "Procesando categoría: $category"
+            
+            for script in "$MATEOS_PATH/bin/$category"/mateos-*; do
+                if [ -f "$script" ] && [ -x "$script" ]; then
+                    local cmd_name=$(basename "$script" | sed 's/mateos-//')
+                    local description=$(grep -m1 "^# " "$script" | sed 's/^# //' || echo "Sin descripción")
+                    local usage=$(grep -m1 "Uso:" "$script" | sed 's/.*Uso: //' || echo "")
+                    local help_text=$(grep -A5 "Uso:" "$script" | head -6 | tail -5 | sed 's/^/    /' || echo "")
+                    
+                    # Extraer argumentos del script
+                    local args=$(grep -o '"\$[0-9]*"' "$script" | sort -u | tr -d '"' | tr '\n' ' ' || echo "")
+                    
+                    if [ "$first" = false ]; then
+                        echo "," >> "$COMMAND_INDEX"
+                    fi
+                    first=false
+                    
+                    cat >> "$COMMAND_INDEX" << EOF
+    "$cmd_name": {
+      "category": "$category",
+      "priority": ${CATEGORY_PRIORITY[$category]},
+      "path": "$script",
+      "description": "$description",
+      "usage": "$usage",
+      "help": "$help_text",
+      "args": "$args",
+      "last_modified": "$(stat -c %Y "$script" 2>/dev/null || echo "0")"
+    }
+EOF
+                    ((total_commands++))
+                fi
+            done
+        fi
+    done
+    
+    # Actualizar timestamp
+    local timestamp=$(date -Iseconds)
+    sed -i "s/\"last_updated\": \"\"/\"last_updated\": \"$timestamp\"/" "$COMMAND_INDEX"
+    
+    echo "  }" >> "$COMMAND_INDEX"
+    echo "}" >> "$COMMAND_INDEX"
+    
+    echo -e "${GREEN}✅ Índice construido con $total_commands comandos${NC}"
+    log_debug "Índice guardado en: $COMMAND_INDEX"
+}
+
+# Función para buscar comando con prioridad y caché
+find_command() {
+    local cmd="$1"
+    
+    # Verificar si el índice existe y es reciente (menos de 1 hora)
+    if [ ! -f "$COMMAND_INDEX" ] || [ "$(find "$COMMAND_INDEX" -mmin +60 2>/dev/null)" ]; then
+        log_debug "Índice no existe o es antiguo, reconstruyendo..."
+        build_command_index
+    fi
+    
+    # Buscar comando en índice usando jq
+    if command -v jq >/dev/null 2>&1; then
+        local result=$(jq -r ".commands.\"$cmd\" // empty" "$COMMAND_INDEX" 2>/dev/null)
+        if [ -n "$result" ] && [ "$result" != "null" ]; then
+            echo "$result" | jq -r '.path'
+            return 0
+        fi
+    else
+        # Fallback sin jq
+        grep -A10 "\"$cmd\":" "$COMMAND_INDEX" | grep '"path"' | cut -d'"' -f4
+        return $?
+    fi
+    
+    return 1
+}
+
+# Función para autocompletación
+complete_commands() {
+    if [ ! -f "$COMMAND_INDEX" ]; then
+        build_command_index
+    fi
+    
+    if command -v jq >/dev/null 2>&1; then
+        jq -r '.commands | keys[]' "$COMMAND_INDEX" 2>/dev/null | sort
+    else
+        # Fallback sin jq
+        grep -o '"[^"]*":' "$COMMAND_INDEX" | sed 's/["":]//g' | sort
+    fi
+}
+
+# Función para sugerencias fuzzy
+suggest_commands() {
+    local query="$1"
+    if [ ! -f "$COMMAND_INDEX" ]; then
+        build_command_index
+    fi
+    
+    # Búsqueda fuzzy con fzf si está disponible
+    if command -v fzf >/dev/null 2>&1; then
+        if command -v jq >/dev/null 2>&1; then
+            jq -r '.commands | to_entries[] | "\(.key) - \(.value.description)"' "$COMMAND_INDEX" | \
+            fzf --filter="$query" --height=40% --preview="echo {}" --preview-window=down:3
+        else
+            grep -i "$query" "$COMMAND_INDEX" | head -10
+        fi
+    else
+        # Búsqueda simple
+        if command -v jq >/dev/null 2>&1; then
+            jq -r '.commands | keys[]' "$COMMAND_INDEX" | grep -i "$query"
+        else
+            grep -i "$query" "$COMMAND_INDEX" | head -10
+        fi
+    fi
+}
+
+# Función para mostrar ayuda mejorada
+show_help() {
+    local cmd="$1"
+    
+    if [ -z "$cmd" ]; then
+        echo -e "${PURPLE}🔧 MateOS Command Manager v2.0${NC}"
+        echo ""
+        echo -e "${CYAN}Uso:${NC} mateos <comando> [argumentos...]"
+        echo ""
+        echo -e "${CYAN}Comandos disponibles:${NC}"
+        echo -e "  ${GREEN}list${NC}                    - Listar todos los comandos"
+        echo -e "  ${GREEN}search <patrón>${NC}         - Buscar comandos"
+        echo -e "  ${GREEN}help <comando>${NC}         - Ayuda de comando específico"
+        echo -e "  ${GREEN}update-index${NC}           - Actualizar índice de comandos"
+        echo -e "  ${GREEN}validate${NC}               - Validar comandos"
+        echo ""
+        echo -e "${CYAN}Para autocompletación, instala fzf:${NC}"
+        echo -e "  ${YELLOW}mateos-pkg-install fzf${NC}"
+        echo ""
+        echo -e "${CYAN}Para búsqueda avanzada, instala jq:${NC}"
+        echo -e "  ${YELLOW}mateos-pkg-install jq${NC}"
+        return 0
+    fi
+    
+    # Mostrar ayuda del comando específico
+    local cmd_path=$(find_command "$cmd")
+    if [ -n "$cmd_path" ] && [ -f "$cmd_path" ]; then
+        echo -e "${PURPLE}📖 Ayuda para: mateos-$cmd${NC}"
+        echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+        
+        # Mostrar información del índice si está disponible
+        if command -v jq >/dev/null 2>&1 && [ -f "$COMMAND_INDEX" ]; then
+            local cmd_info=$(jq -r ".commands.\"$cmd\"" "$COMMAND_INDEX" 2>/dev/null)
+            if [ -n "$cmd_info" ] && [ "$cmd_info" != "null" ]; then
+                echo -e "${GREEN}Descripción:${NC} $(echo "$cmd_info" | jq -r '.description')"
+                echo -e "${GREEN}Categoría:${NC} $(echo "$cmd_info" | jq -r '.category')"
+                echo -e "${GREEN}Uso:${NC} $(echo "$cmd_info" | jq -r '.usage')"
+                echo ""
+            fi
+        fi
+        
+        # Ejecutar ayuda del comando
+        if "$cmd_path" --help 2>/dev/null; then
+            # Comando tiene --help
+        elif "$cmd_path" -h 2>/dev/null; then
+            # Comando tiene -h
+        else
+            # Ejecutar sin argumentos para ver ayuda por defecto
+            "$cmd_path" 2>/dev/null || echo -e "${YELLOW}Sin ayuda disponible${NC}"
+        fi
+    else
+        echo -e "${RED}❌ Comando '$cmd' no encontrado${NC}"
+        echo ""
+        echo -e "${CYAN}💡 Sugerencias:${NC}"
+        suggest_commands "$cmd" | head -5
+        echo ""
+        echo -e "${CYAN}Usa 'mateos search $cmd' para más opciones${NC}"
+    fi
+}
+
+# Función para validar comandos
+validate_commands() {
+    echo -e "${CYAN}🔍 Validando comandos de MateOS...${NC}"
+    echo ""
+    
+    local total=0
+    local valid=0
+    local invalid=0
+    
+    if [ ! -f "$COMMAND_INDEX" ]; then
+        build_command_index
+    fi
+    
+    if command -v jq >/dev/null 2>&1; then
+        # Usar jq para procesar el índice
+        local commands=$(jq -r '.commands | keys[]' "$COMMAND_INDEX")
+        
+        while IFS= read -r cmd; do
+            ((total++))
+            local cmd_path=$(find_command "$cmd")
+            
+            if [ -n "$cmd_path" ] && [ -f "$cmd_path" ]; then
+                # Verificar sintaxis
+                if bash -n "$cmd_path" 2>/dev/null; then
+                    echo -e "  ${GREEN}✅${NC} $cmd"
+                    ((valid++))
+                else
+                    echo -e "  ${RED}❌${NC} $cmd (error de sintaxis)"
+                    ((invalid++))
+                fi
+            else
+                echo -e "  ${RED}❌${NC} $cmd (archivo no encontrado)"
+                ((invalid++))
+            fi
+        done <<< "$commands"
+    else
+        # Fallback sin jq
+        echo -e "${YELLOW}⚠️  jq no disponible, validación limitada${NC}"
+        for category in system apps packages themes dev webapps utils; do
+            if [ -d "$MATEOS_PATH/bin/$category" ]; then
+                for script in "$MATEOS_PATH/bin/$category"/mateos-*; do
+                    if [ -f "$script" ]; then
+                        ((total++))
+                        if bash -n "$script" 2>/dev/null; then
+                            echo -e "  ${GREEN}✅${NC} $(basename "$script")"
+                            ((valid++))
+                        else
+                            echo -e "  ${RED}❌${NC} $(basename "$script")"
+                            ((invalid++))
+                        fi
+                    fi
+                done
+            fi
+        done
+    fi
+    
+    echo ""
+    echo -e "${CYAN}📊 Resumen:${NC}"
+    echo -e "  Total: $total"
+    echo -e "  ${GREEN}Válidos: $valid${NC}"
+    echo -e "  ${RED}Inválidos: $invalid${NC}"
+    
+    if [ $invalid -eq 0 ]; then
+        echo -e "${GREEN}✅ Todos los comandos son válidos${NC}"
+        return 0
+    else
+        echo -e "${RED}❌ Se encontraron $invalid comandos con problemas${NC}"
+        return 1
+    fi
+}
+
+# Función para búsqueda avanzada
+search_commands() {
+    local query="$1"
+    if [ -z "$query" ]; then
+        echo -e "${RED}Uso: mateos search <patrón>${NC}"
+        return 1
+    fi
+    
+    echo -e "${CYAN}🔍 Buscando comandos que coincidan con '$query':${NC}"
+    echo ""
+    
+    if [ ! -f "$COMMAND_INDEX" ]; then
+        build_command_index
+    fi
+    
+    if command -v jq >/dev/null 2>&1; then
+        # Búsqueda avanzada con jq
+        local results=$(jq -r ".commands | to_entries[] | select(.key | test(\"$query\"; \"i\")) | \"\(.key) - \(.value.description)\"" "$COMMAND_INDEX")
+        
+        if [ -n "$results" ]; then
+            echo "$results" | while IFS= read -r line; do
+                echo -e "  ${GREEN}${line%% - *}${NC} - ${line#* - }"
+            done
+        else
+            echo -e "${YELLOW}No se encontraron comandos que coincidan con '$query'${NC}"
+        fi
+    else
+        # Búsqueda simple
+        suggest_commands "$query"
+    fi
+}
+
+# Función para listar comandos con información
+list_commands() {
+    if [ ! -f "$COMMAND_INDEX" ]; then
+        build_command_index
+    fi
+    
+    echo -e "${PURPLE}📋 Comandos disponibles en MateOS:${NC}"
+    echo ""
+    
+    if command -v jq >/dev/null 2>&1; then
+        # Lista organizada con jq
+        jq -r '.commands | to_entries[] | "\(.key) - \(.value.description)"' "$COMMAND_INDEX" | sort | while IFS= read -r line; do
+            echo -e "  ${GREEN}${line%% - *}${NC} - ${line#* - }"
+        done
+    else
+        # Lista simple sin jq
+        for category in system apps packages themes dev webapps utils; do
+            if [ -d "$MATEOS_PATH/bin/$category" ]; then
+                echo -e "${CYAN}=== ${category^^} ===${NC}"
+                ls "$MATEOS_PATH/bin/$category"/mateos-* 2>/dev/null | while read -r script; do
+                    local cmd_name=$(basename "$script" | sed 's/mateos-//')
+                    echo -e "  ${GREEN}$cmd_name${NC}"
+                done
+                echo ""
+            fi
+        done
+    fi
+}
+
+# Función principal mejorada
+main() {
+    local command="$1"
+    
+    case "$command" in
+        "list")
+            list_commands
+            ;;
+        "search")
+            search_commands "$2"
+            ;;
+        "help")
+            show_help "$2"
+            ;;
+        "update-index")
+            build_command_index
+            ;;
+        "validate")
+            validate_commands
+            ;;
+        "")
+            show_help
+            ;;
+        *)
+            # Buscar y ejecutar comando
+            local cmd_path=$(find_command "$command")
+            if [ -n "$cmd_path" ] && [ -f "$cmd_path" ]; then
+                log_debug "Ejecutando: $cmd_path con argumentos: ${@:2}"
+                exec "$cmd_path" "${@:2}"
+            else
+                echo -e "${RED}❌ Comando 'mateos-$command' no encontrado${NC}"
+                echo ""
+                echo -e "${CYAN}💡 Sugerencias:${NC}"
+                suggest_commands "$command" | head -5
+                echo ""
+                echo -e "${CYAN}Usa 'mateos search $command' para más opciones${NC}"
+                exit 1
+            fi
+            ;;
+    esac
+}
+
+# Configurar autocompletación si está disponible
+if [ -n "$BASH_VERSION" ]; then
+    complete -F _mateos_complete mateos
+    _mateos_complete() {
+        local cur="${COMP_WORDS[COMP_CWORD]}"
+        local commands=$(complete_commands)
+        COMPREPLY=($(compgen -W "$commands" -- "$cur"))
+    }
+fi
+
+# Ejecutar función principal
+main "$@"

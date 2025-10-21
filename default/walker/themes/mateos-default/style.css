@@ -1,4 +1,11 @@
-@import "~/.config/mateos/current/theme/walker.css";
+/* @import "~/.config/mateos/current/theme/walker.css"; */
+
+/* Define basic colors */
+@define-color base #1e1e2e;
+@define-color text #cdd6f4;
+@define-color border #313244;
+@define-color background #11111b;
+@define-color selected-text #f5c2e7;
 
 * {
   all: unset;
@@ -23,7 +30,7 @@ scrollbar {
 }
 
 .box-wrapper {
-  background: alpha(@base, 0.95);
+  background: @base;
   padding: 20px;
   border: 2px solid @border;
 }

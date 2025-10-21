@@ -1,0 +1,283 @@
+#!/bin/bash
+
+# MateOS Command Manager v2.0 - Wrapper Mejorado
+# Sistema de gestión de comandos con logging, validación y autocompletación
+
+MATEOS_PATH="${MATEOS_PATH:-$HOME/.local/share/mateOS}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# Cargar variables de entorno centralizadas
+if [ -f "$MATEOS_PATH/config/mateos-vars.sh" ]; then
+    source "$MATEOS_PATH/config/mateos-vars.sh"
+fi
+
+# Configuración de logging
+LOG_COMMANDS="${MATEOS_LOG_COMMANDS:-true}"
+LOG_PERFORMANCE="${MATEOS_LOG_PERFORMANCE:-true}"
+DEBUG_MODE="${MATEOS_DEBUG:-false}"
+
+# Función para logging
+log_command() {
+    if [ "$LOG_COMMANDS" = "true" ]; then
+        local cmd="$1"
+        local args="$2"
+        local exit_code="$3"
+        local duration="$4"
+        
+        # Usar el sistema de logging centralizado si está disponible
+        if [ -f "$SCRIPT_DIR/system/mateos-logger" ]; then
+            "$SCRIPT_DIR/system/mateos-logger" command "$cmd" "$args" "$exit_code" "$duration" "mateos-wrapper"
+        fi
+    fi
+}
+
+# Función para medir tiempo de ejecución
+measure_execution_time() {
+    local start_time=$(date +%s%3N)
+    local end_time
+    local duration
+    
+    # Ejecutar comando
+    "$@"
+    local exit_code=$?
+    
+    # Calcular duración
+    end_time=$(date +%s%3N)
+    duration=$((end_time - start_time))
+    
+    # Loggear si está habilitado
+    if [ "$LOG_COMMANDS" = "true" ]; then
+        log_command "$1" "${*:2}" "$exit_code" "$duration"
+    fi
+    
+    return $exit_code
+}
+
+# Función para buscar comando mejorada
+find_command() {
+    local command="$1"
+    local found_path=""
+    
+    # Categorías en orden de prioridad (eliminando las inexistentes)
+    local categories=("system" "apps" "packages" "themes" "dev" "webapps" "utils")
+    
+    for category in "${categories[@]}"; do
+        local cmd_path="$SCRIPT_DIR/$category/mateos-$command"
+        if [ -f "$cmd_path" ] && [ -x "$cmd_path" ]; then
+            found_path="$cmd_path"
+            break
+        fi
+    done
+    
+    echo "$found_path"
+}
+
+# Función para mostrar ayuda mejorada
+show_help() {
+    echo "🔧 MateOS Command Manager v2.0"
+    echo ""
+    echo "Uso: mateos <comando> [argumentos...]"
+    echo ""
+    echo "Categorías disponibles:"
+    echo "  system/     - Comandos del sistema (97 comandos)"
+    echo "  apps/       - Comandos de aplicaciones (1 comando)"
+    echo "  packages/   - Gestión de paquetes (10 comandos)"
+    echo "  themes/     - Gestión de temas (14 comandos)"
+    echo "  dev/        - Herramientas de desarrollo (10 comandos)"
+    echo "  webapps/    - Aplicaciones web (4 comandos)"
+    echo "  utils/      - Utilidades (4 comandos)"
+    echo ""
+    echo "Comandos especiales:"
+    echo "  list                    - Listar todos los comandos"
+    echo "  search <patrón>         - Buscar comandos"
+    echo "  help <comando>         - Ayuda de comando específico"
+    echo "  validate               - Validar comandos"
+    echo "  stats                  - Estadísticas del sistema"
+    echo ""
+    echo "Para autocompletación, instala fzf:"
+    echo "  mateos-pkg-install fzf"
+    echo ""
+    echo "Para búsqueda avanzada, instala jq:"
+    echo "  mateos-pkg-install jq"
+}
+
+# Función para listar comandos mejorada
+list_commands() {
+    echo "📋 Comandos disponibles en MateOS:"
+    echo ""
+    
+    local total=0
+    for category in system apps packages themes dev webapps utils; do
+        if [ -d "$SCRIPT_DIR/$category" ]; then
+            local count=$(ls "$SCRIPT_DIR/$category"/mateos-* 2>/dev/null | wc -l)
+            echo "=== ${category^^} ($count comandos) ==="
+            ls "$SCRIPT_DIR/$category/" 2>/dev/null | sed 's/^/  /'
+            echo ""
+            total=$((total + count))
+        fi
+    done
+    
+    echo "Total: $total comandos disponibles"
+}
+
+# Función para buscar comandos
+search_commands() {
+    local query="$1"
+    if [ -z "$query" ]; then
+        echo "Uso: mateos search <patrón>"
+        return 1
+    fi
+    
+    echo "🔍 Buscando comandos que coincidan con '$query':"
+    echo ""
+    
+    local found=0
+    for category in system apps packages themes dev webapps utils; do
+        if [ -d "$SCRIPT_DIR/$category" ]; then
+            for script in "$SCRIPT_DIR/$category"/mateos-*; do
+                if [ -f "$script" ]; then
+                    local cmd_name=$(basename "$script" | sed 's/mateos-//')
+                    if echo "$cmd_name" | grep -qi "$query"; then
+                        echo "  $cmd_name"
+                        found=$((found + 1))
+                    fi
+                fi
+            done
+        fi
+    done
+    
+    if [ $found -eq 0 ]; then
+        echo "No se encontraron comandos que coincidan con '$query'"
+    else
+        echo ""
+        echo "Encontrados: $found comandos"
+    fi
+}
+
+# Función para mostrar estadísticas
+show_stats() {
+    echo "📊 Estadísticas de MateOS:"
+    echo ""
+    
+    local total_commands=0
+    local total_size=0
+    
+    for category in system apps packages themes dev webapps utils; do
+        if [ -d "$SCRIPT_DIR/$category" ]; then
+            local count=$(ls "$SCRIPT_DIR/$category"/mateos-* 2>/dev/null | wc -l)
+            local size=$(du -sh "$SCRIPT_DIR/$category" 2>/dev/null | cut -f1)
+            echo "  $category: $count comandos ($size)"
+            total_commands=$((total_commands + count))
+        fi
+    done
+    
+    echo ""
+    echo "Total: $total_commands comandos"
+    
+    # Mostrar información del sistema
+    if [ -f "$SCRIPT_DIR/system/mateos-version" ]; then
+        echo "Versión: $("$SCRIPT_DIR/system/mateos-version" 2>/dev/null || echo "Desconocida")"
+    fi
+    
+    # Mostrar logs si están disponibles
+    if [ -f "$HOME/.local/state/mateOS/logs/commands.log" ]; then
+        local log_entries=$(wc -l < "$HOME/.local/state/mateOS/logs/commands.log" 2>/dev/null || echo "0")
+        echo "Logs: $log_entries entradas"
+    fi
+}
+
+# Función principal
+main() {
+    local COMMAND="$1"
+    
+    # Comandos especiales
+    case "$COMMAND" in
+        "")
+            show_help
+            ;;
+        "list")
+            list_commands
+            ;;
+        "search")
+            search_commands "$2"
+            ;;
+        "help")
+            if [ -n "$2" ]; then
+                # Mostrar ayuda de comando específico
+                local cmd_path=$(find_command "$2")
+                if [ -n "$cmd_path" ] && [ -f "$cmd_path" ]; then
+                    echo "📖 Ayuda para: mateos-$2"
+                    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+                    "$cmd_path" --help 2>/dev/null || "$cmd_path" -h 2>/dev/null || "$cmd_path" 2>/dev/null || echo "Sin ayuda disponible"
+                else
+                    echo "❌ Comando 'mateos-$2' no encontrado"
+                    echo "Usa 'mateos search $2' para buscar comandos similares"
+                fi
+            else
+                show_help
+            fi
+            ;;
+        "validate")
+            if [ -f "$SCRIPT_DIR/system/mateos-validate" ]; then
+                "$SCRIPT_DIR/system/mateos-validate" all
+            else
+                echo "❌ Sistema de validación no disponible"
+            fi
+            ;;
+        "stats")
+            show_stats
+            ;;
+        *)
+            # Buscar y ejecutar comando
+            local cmd_path=$(find_command "$COMMAND")
+            if [ -n "$cmd_path" ] && [ -f "$cmd_path" ]; then
+                if [ "$DEBUG_MODE" = "true" ]; then
+                    echo "🔍 Ejecutando: $cmd_path con argumentos: ${@:2}"
+                fi
+                
+                if [ "$LOG_COMMANDS" = "true" ] || [ "$LOG_PERFORMANCE" = "true" ]; then
+                    measure_execution_time "$cmd_path" "${@:2}"
+                else
+                    exec "$cmd_path" "${@:2}"
+                fi
+            else
+                echo "❌ Comando 'mateos-$COMMAND' no encontrado"
+                echo ""
+                echo "💡 Sugerencias:"
+                search_commands "$COMMAND" | head -5
+                echo ""
+                echo "Usa 'mateos search $COMMAND' para más opciones"
+                exit 1
+            fi
+            ;;
+    esac
+}
+
+# Configurar autocompletación si está disponible
+if [ -n "$BASH_VERSION" ]; then
+    complete -F _mateos_complete mateos
+    _mateos_complete() {
+        local cur="${COMP_WORDS[COMP_CWORD]}"
+        local commands=""
+        
+        # Obtener lista de comandos
+        for category in system apps packages themes dev webapps utils; do
+            if [ -d "$SCRIPT_DIR/$category" ]; then
+                for script in "$SCRIPT_DIR/$category"/mateos-*; do
+                    if [ -f "$script" ]; then
+                        local cmd_name=$(basename "$script" | sed 's/mateos-//')
+                        commands="$commands $cmd_name"
+                    fi
+                done
+            fi
+        done
+        
+        # Agregar comandos especiales
+        commands="$commands list search help validate stats"
+        
+        COMPREPLY=($(compgen -W "$commands" -- "$cur"))
+    }
+fi
+
+# Ejecutar función principal
+main "$@"

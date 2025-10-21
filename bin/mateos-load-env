@@ -1,0 +1,134 @@
+#!/bin/bash
+
+# MateOS Environment Loader
+# Cargador automático de variables de entorno para todos los comandos
+
+MATEOS_PATH="${MATEOS_PATH:-$HOME/.local/share/mateOS}"
+
+# Función para cargar variables de entorno
+load_mateos_env() {
+    # Cargar archivo de variables centralizado
+    if [ -f "$MATEOS_PATH/config/mateos-vars.sh" ]; then
+        source "$MATEOS_PATH/config/mateos-vars.sh"
+        return 0
+    else
+        echo "❌ Archivo de variables no encontrado: $MATEOS_PATH/config/mateos-vars.sh"
+        return 1
+    fi
+}
+
+# Función para verificar variables cargadas
+check_env_vars() {
+    local missing_vars=()
+    
+    # Variables críticas
+    local critical_vars=("MATEOS_PATH" "HOME" "USER" "EDITOR" "TERMINAL")
+    
+    for var in "${critical_vars[@]}"; do
+        if [ -z "${!var}" ]; then
+            missing_vars+=("$var")
+        fi
+    done
+    
+    if [ ${#missing_vars[@]} -eq 0 ]; then
+        echo "✅ Todas las variables críticas están definidas"
+        return 0
+    else
+        echo "❌ Variables faltantes: ${missing_vars[*]}"
+        return 1
+    fi
+}
+
+# Función para mostrar variables cargadas
+show_env_vars() {
+    echo "📋 Variables de entorno de MateOS:"
+    echo ""
+    
+    # Variables principales
+    echo "🔧 Principales:"
+    echo "  MATEOS_PATH: $MATEOS_PATH"
+    echo "  HOME: $HOME"
+    echo "  USER: $USER"
+    echo "  EDITOR: $EDITOR"
+    echo "  TERMINAL: $TERMINAL"
+    echo ""
+    
+    # Variables de configuración
+    echo "⚙️  Configuración:"
+    echo "  MATEOS_CONFIG_PATH: $MATEOS_CONFIG_PATH"
+    echo "  MATEOS_STATE_PATH: $MATEOS_STATE_PATH"
+    echo "  MATEOS_LOG_PATH: $MATEOS_LOG_PATH"
+    echo ""
+    
+    # Variables de aplicaciones
+    echo "📱 Aplicaciones:"
+    echo "  MATEOS_TERMINAL: $MATEOS_TERMINAL"
+    echo "  MATEOS_BROWSER: $MATEOS_BROWSER"
+    echo "  MATEOS_EDITOR: $MATEOS_EDITOR"
+    echo ""
+    
+    # Variables de temas
+    echo "🎨 Temas:"
+    echo "  MATEOS_DEFAULT_THEME: $MATEOS_DEFAULT_THEME"
+    echo "  MATEOS_THEME_AUTO_APPLY: $MATEOS_THEME_AUTO_APPLY"
+    echo ""
+}
+
+# Función para aplicar perfil
+apply_profile() {
+    local profile="$1"
+    
+    if [ -z "$profile" ]; then
+        echo "Uso: mateos-load-env apply <perfil>"
+        echo "Perfiles disponibles: default, development, gaming, server, minimal"
+        return 1
+    fi
+    
+    # Cargar variables base
+    load_mateos_env
+    
+    # Aplicar perfil específico
+    mateos_apply_profile "$profile"
+    
+    echo "✅ Perfil '$profile' aplicado"
+}
+
+# Función principal
+case "$1" in
+    "load")
+        load_mateos_env
+        ;;
+    "check")
+        load_mateos_env
+        check_env_vars
+        ;;
+    "show")
+        load_mateos_env
+        show_env_vars
+        ;;
+    "apply")
+        apply_profile "$2"
+        ;;
+    "help"|"-h"|"--help")
+        echo "🔧 MateOS Environment Loader"
+        echo ""
+        echo "Uso: mateos-load-env <comando> [argumentos]"
+        echo ""
+        echo "Comandos:"
+        echo "  load                    - Cargar variables de entorno"
+        echo "  check                   - Verificar variables críticas"
+        echo "  show                    - Mostrar variables cargadas"
+        echo "  apply <perfil>         - Aplicar perfil específico"
+        echo "  help                    - Mostrar esta ayuda"
+        echo ""
+        echo "Ejemplos:"
+        echo "  mateos-load-env load"
+        echo "  mateos-load-env check"
+        echo "  mateos-load-env show"
+        echo "  mateos-load-env apply development"
+        ;;
+    *)
+        # Cargar variables por defecto
+        load_mateos_env
+        ;;
+esac
