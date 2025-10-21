@@ -82,7 +82,7 @@ run_test_pipeline() {
     # Stage 1: Linting
     if [ "$stage" = "all" ] || [ "$stage" = "lint" ]; then
         echo "1️⃣  Linting scripts..."
-        if mateos-lint check; then
+        if mateos-lint mateos scripts; then
             echo "   ✅ Linting completado"
         else
             echo "   ❌ Linting falló"

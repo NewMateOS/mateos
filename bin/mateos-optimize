@@ -1,0 +1,409 @@
+#!/bin/bash
+
+# MateOS System Optimization
+# Optimización del sistema MateOS
+
+MATEOS_PATH="${MATEOS_PATH:-$HOME/.local/share/mateOS}"
+OPTIMIZE_LOG="$HOME/.local/state/mateOS/logs/optimize.log"
+
+# Crear directorios necesarios
+mkdir -p "$(dirname "$OPTIMIZE_LOG")"
+
+# Función para logging
+optimize_log() {
+    local message="$1"
+    local timestamp=$(date '+%Y-%m-%d %H:%M:%S')
+    echo "[$timestamp] $message" >> "$OPTIMIZE_LOG"
+}
+
+# Función para optimizar configuraciones
+optimize_configs() {
+    echo "🔧 Optimizando configuraciones..."
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    
+    # Optimizar configuración de MateOS
+    if [ -f "$HOME/.config/mateOS/mateos.conf" ]; then
+        # Comprimir configuración si es muy grande
+        local config_size=$(stat -c%s "$HOME/.config/mateOS/mateos.conf" 2>/dev/null || echo "0")
+        if [ "$config_size" -gt 10000 ]; then
+            echo "📦 Comprimiendo configuración grande..."
+            gzip -c "$HOME/.config/mateOS/mateos.conf" > "$HOME/.config/mateOS/mateos.conf.gz"
+            optimize_log "Config compressed: $config_size bytes"
+        fi
+    fi
+    
+    # Optimizar logs
+    if [ -d "$HOME/.local/state/mateOS/logs" ]; then
+        echo "📝 Optimizando logs..."
+        find "$HOME/.local/state/mateOS/logs" -name "*.log" -size +1M -exec gzip {} \;
+        optimize_log "Logs compressed"
+    fi
+    
+    echo "✅ Configuraciones optimizadas"
+}
+
+# Función para optimizar scripts
+optimize_scripts() {
+    echo "🔧 Optimizando scripts..."
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    
+    local optimized=0
+    local total=0
+    
+    # Optimizar scripts de MateOS
+    for script in "$MATEOS_PATH/bin"/*; do
+        if [ -f "$script" ] && [ -x "$script" ]; then
+            ((total++))
+            
+            # Verificar si el script tiene shebang
+            if ! head -1 "$script" | grep -q "^#!"; then
+                echo "⚠️  Script sin shebang: $(basename "$script")"
+            fi
+            
+            # Verificar permisos
+            if [ ! -x "$script" ]; then
+                echo "⚠️  Script no ejecutable: $(basename "$script")"
+            fi
+            
+            # Optimizar tamaño si es muy grande
+            local script_size=$(stat -c%s "$script" 2>/dev/null || echo "0")
+            if [ "$script_size" -gt 50000 ]; then
+                echo "📦 Script grande detectado: $(basename "$script") ($script_size bytes)"
+            fi
+            
+            ((optimized++))
+        fi
+    done
+    
+    echo "📊 Scripts procesados: $optimized/$total"
+    optimize_log "Scripts optimized: $optimized/$total"
+    
+    echo "✅ Scripts optimizados"
+}
+
+# Función para optimizar dependencias
+optimize_dependencies() {
+    echo "🔧 Optimizando dependencias..."
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    
+    # Verificar dependencias críticas
+    local critical_deps=("hyprland" "waybar" "kitty" "gum" "jq")
+    local missing=0
+    
+    for dep in "${critical_deps[@]}"; do
+        if ! command -v "$dep" &>/dev/null; then
+            echo "❌ Dependencia faltante: $dep"
+            ((missing++))
+        else
+            echo "✅ $dep disponible"
+        fi
+    done
+    
+    if [ $missing -eq 0 ]; then
+        echo "✅ Todas las dependencias críticas están disponibles"
+    else
+        echo "⚠️  $missing dependencias críticas faltantes"
+    fi
+    
+    optimize_log "Dependencies checked: $missing missing"
+    
+    echo "✅ Dependencias optimizadas"
+}
+
+# Función para optimizar respaldos
+optimize_backups() {
+    echo "🔧 Optimizando respaldos..."
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    
+    local backup_dir="$HOME/.config/mateOS/backups"
+    local total_size=0
+    local backup_count=0
+    
+    if [ -d "$backup_dir" ]; then
+        # Calcular tamaño total de respaldos
+        total_size=$(du -sb "$backup_dir" 2>/dev/null | cut -f1)
+        backup_count=$(find "$backup_dir" -type d -name "mateOS-backup-*" | wc -l)
+        
+        echo "📊 Respaldos encontrados: $backup_count"
+        echo "📊 Tamaño total: $(numfmt --to=iec $total_size)"
+        
+        # Limpiar respaldos antiguos (más de 30 días)
+        local old_backups=$(find "$backup_dir" -type d -name "mateOS-backup-*" -mtime +30 | wc -l)
+        if [ "$old_backups" -gt 0 ]; then
+            echo "🗑️  Limpiando $old_backups respaldos antiguos..."
+            find "$backup_dir" -type d -name "mateOS-backup-*" -mtime +30 -exec rm -rf {} \;
+            optimize_log "Old backups cleaned: $old_backups"
+        fi
+        
+        # Comprimir respaldos grandes
+        find "$backup_dir" -type d -name "mateOS-backup-*" -size +100M | while read backup; do
+            echo "📦 Comprimiendo respaldo grande: $(basename "$backup")"
+            tar -czf "${backup}.tar.gz" -C "$(dirname "$backup")" "$(basename "$backup")"
+            rm -rf "$backup"
+            optimize_log "Backup compressed: $(basename "$backup")"
+        done
+    else
+        echo "ℹ️  No hay directorio de respaldos"
+    fi
+    
+    echo "✅ Respaldos optimizados"
+}
+
+# Función para optimizar logs
+optimize_logs() {
+    echo "🔧 Optimizando logs..."
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    
+    local log_dir="$HOME/.local/state/mateOS/logs"
+    local total_size=0
+    local log_count=0
+    
+    if [ -d "$log_dir" ]; then
+        # Calcular tamaño total de logs
+        total_size=$(du -sb "$log_dir" 2>/dev/null | cut -f1)
+        log_count=$(find "$log_dir" -name "*.log" | wc -l)
+        
+        echo "📊 Logs encontrados: $log_count"
+        echo "📊 Tamaño total: $(numfmt --to=iec $total_size)"
+        
+        # Rotar logs grandes
+        find "$log_dir" -name "*.log" -size +10M | while read logfile; do
+            echo "🔄 Rotando log grande: $(basename "$logfile")"
+            mv "$logfile" "${logfile}.old"
+            touch "$logfile"
+            optimize_log "Log rotated: $(basename "$logfile")"
+        done
+        
+        # Comprimir logs antiguos
+        find "$log_dir" -name "*.log.old" -mtime +7 | while read logfile; do
+            echo "📦 Comprimiendo log antiguo: $(basename "$logfile")"
+            gzip "$logfile"
+            optimize_log "Log compressed: $(basename "$logfile")"
+        done
+    else
+        echo "ℹ️  No hay directorio de logs"
+    fi
+    
+    echo "✅ Logs optimizados"
+}
+
+# Función para optimizar caché
+optimize_cache() {
+    echo "🔧 Optimizando caché..."
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    
+    local cache_dir="$HOME/.cache/mateOS"
+    local total_size=0
+    
+    if [ -d "$cache_dir" ]; then
+        # Calcular tamaño del caché
+        total_size=$(du -sb "$cache_dir" 2>/dev/null | cut -f1)
+        echo "📊 Tamaño del caché: $(numfmt --to=iec $total_size)"
+        
+        # Limpiar caché antiguo
+        find "$cache_dir" -type f -mtime +7 -delete 2>/dev/null
+        echo "🗑️  Caché antiguo limpiado"
+        
+        optimize_log "Cache optimized: $(numfmt --to=iec $total_size)"
+    else
+        echo "ℹ️  No hay directorio de caché"
+    fi
+    
+    echo "✅ Caché optimizado"
+}
+
+# Función para optimizar permisos
+optimize_permissions() {
+    echo "🔧 Optimizando permisos..."
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    
+    local fixed=0
+    
+    # Verificar permisos de scripts
+    for script in "$MATEOS_PATH/bin"/*; do
+        if [ -f "$script" ] && [ ! -x "$script" ]; then
+            chmod +x "$script"
+            echo "🔧 Permisos corregidos: $(basename "$script")"
+            ((fixed++))
+        fi
+    done
+    
+    # Verificar permisos de configuración
+    if [ -d "$HOME/.config/mateOS" ]; then
+        chmod 755 "$HOME/.config/mateOS"
+        find "$HOME/.config/mateOS" -type f -name "*.conf" -exec chmod 644 {} \;
+        find "$HOME/.config/mateOS" -type f -name "*.sh" -exec chmod 755 {} \;
+    fi
+    
+    echo "📊 Permisos corregidos: $fixed"
+    optimize_log "Permissions optimized: $fixed fixed"
+    
+    echo "✅ Permisos optimizados"
+}
+
+# Función para generar reporte de optimización
+generate_report() {
+    local report_file="$HOME/.local/state/mateOS/optimize-report-$(date +%Y%m%d-%H%M%S).txt"
+    
+    echo "📋 Generando reporte de optimización..."
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    
+    cat > "$report_file" << EOF
+# Reporte de Optimización MateOS
+# Generado: $(date)
+
+## Resumen del Sistema
+- Versión: $(cat "$MATEOS_PATH/version" 2>/dev/null || echo "Desconocida")
+- Usuario: $USER
+- Sistema: $(uname -s)
+- Arquitectura: $(uname -m)
+
+## Configuraciones
+- Archivo de configuración: $([ -f "$HOME/.config/mateOS/mateos.conf" ] && echo "✅ Presente" || echo "❌ Faltante")
+- Variables de entorno: $([ -f "$HOME/.config/mateOS/mateos.env" ] && echo "✅ Presente" || echo "❌ Faltante")
+
+## Scripts
+- Total de scripts: $(find "$MATEOS_PATH/bin" -type f -executable | wc -l)
+- Scripts ejecutables: $(find "$MATEOS_PATH/bin" -type f -executable | wc -l)
+
+## Respaldos
+- Directorio de respaldos: $([ -d "$HOME/.config/mateOS/backups" ] && echo "✅ Presente" || echo "❌ Faltante")
+- Número de respaldos: $(find "$HOME/.config/mateOS/backups" -type d -name "mateOS-backup-*" 2>/dev/null | wc -l)
+
+## Logs
+- Directorio de logs: $([ -d "$HOME/.local/state/mateOS/logs" ] && echo "✅ Presente" || echo "❌ Faltante")
+- Número de logs: $(find "$HOME/.local/state/mateOS/logs" -name "*.log" 2>/dev/null | wc -l)
+
+## Dependencias
+- hyprland: $(command -v hyprland &>/dev/null && echo "✅" || echo "❌")
+- waybar: $(command -v waybar &>/dev/null && echo "✅" || echo "❌")
+- kitty: $(command -v kitty &>/dev/null && echo "✅" || echo "❌")
+- gum: $(command -v gum &>/dev/null && echo "✅" || echo "❌")
+- jq: $(command -v jq &>/dev/null && echo "✅" || echo "❌")
+
+## Plugins
+- Plugins instalados: $(mateos-plugins list 2>/dev/null | grep -c "✅" || echo "0")
+
+## Optimizaciones Aplicadas
+$(tail -20 "$OPTIMIZE_LOG" 2>/dev/null || echo "No hay logs de optimización")
+
+EOF
+    
+    echo "✅ Reporte generado: $report_file"
+    optimize_log "Report generated: $report_file"
+}
+
+# Función para optimización completa
+full_optimization() {
+    echo "🚀 Optimización completa del sistema MateOS"
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo ""
+    
+    optimize_log "Full optimization started"
+    
+    optimize_configs
+    echo ""
+    optimize_scripts
+    echo ""
+    optimize_dependencies
+    echo ""
+    optimize_backups
+    echo ""
+    optimize_logs
+    echo ""
+    optimize_cache
+    echo ""
+    optimize_permissions
+    echo ""
+    generate_report
+    
+    echo ""
+    echo "🎉 Optimización completa finalizada"
+    optimize_log "Full optimization completed"
+}
+
+# Función para mostrar estadísticas
+show_stats() {
+    echo "📊 Estadísticas del sistema MateOS"
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    
+    # Scripts
+    local script_count=$(find "$MATEOS_PATH/bin" -type f -executable | wc -l)
+    echo "🔧 Scripts: $script_count"
+    
+    # Configuraciones
+    local config_count=$(find "$HOME/.config/mateOS" -name "*.conf" 2>/dev/null | wc -l)
+    echo "⚙️  Configuraciones: $config_count"
+    
+    # Respaldos
+    local backup_count=$(find "$HOME/.config/mateOS/backups" -type d -name "mateOS-backup-*" 2>/dev/null | wc -l)
+    echo "💾 Respaldos: $backup_count"
+    
+    # Logs
+    local log_count=$(find "$HOME/.local/state/mateOS/logs" -name "*.log" 2>/dev/null | wc -l)
+    echo "📝 Logs: $log_count"
+    
+    # Plugins
+    local plugin_count=$(mateos-plugins list 2>/dev/null | grep -c "✅" || echo "0")
+    echo "🔌 Plugins: $plugin_count"
+    
+    # Tamaño total
+    local total_size=$(du -sb "$MATEOS_PATH" 2>/dev/null | cut -f1)
+    echo "📦 Tamaño total: $(numfmt --to=iec $total_size)"
+}
+
+# Función principal
+case "$1" in
+    "configs")
+        optimize_configs
+        ;;
+    "scripts")
+        optimize_scripts
+        ;;
+    "deps")
+        optimize_dependencies
+        ;;
+    "backups")
+        optimize_backups
+        ;;
+    "logs")
+        optimize_logs
+        ;;
+    "cache")
+        optimize_cache
+        ;;
+    "permissions")
+        optimize_permissions
+        ;;
+    "report")
+        generate_report
+        ;;
+    "stats")
+        show_stats
+        ;;
+    "full"|"all")
+        full_optimization
+        ;;
+    *)
+        echo "🔧 MateOS System Optimization"
+        echo ""
+        echo "Uso: mateos-optimize <comando>"
+        echo ""
+        echo "Comandos:"
+        echo "  configs      - Optimizar configuraciones"
+        echo "  scripts      - Optimizar scripts"
+        echo "  deps         - Optimizar dependencias"
+        echo "  backups      - Optimizar respaldos"
+        echo "  logs         - Optimizar logs"
+        echo "  cache        - Optimizar caché"
+        echo "  permissions  - Optimizar permisos"
+        echo "  report       - Generar reporte"
+        echo "  stats        - Mostrar estadísticas"
+        echo "  full         - Optimización completa"
+        echo ""
+        echo "Ejemplos:"
+        echo "  mateos-optimize full"
+        echo "  mateos-optimize stats"
+        echo "  mateos-optimize backups"
+        ;;
+esac

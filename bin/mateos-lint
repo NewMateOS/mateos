@@ -1,0 +1,408 @@
+#!/bin/bash
+
+# MateOS Linting System
+# Sistema de linting para scripts de MateOS
+
+MATEOS_PATH="${MATEOS_PATH:-$HOME/.local/share/mateOS}"
+LINT_CONFIG="$HOME/.config/mateOS/lint.conf"
+LINT_LOG="$HOME/.local/state/mateOS/logs/lint.log"
+
+# Crear directorios necesarios
+mkdir -p "$(dirname "$LINT_CONFIG")" "$(dirname "$LINT_LOG")"
+
+# Función para logging de linting
+lint_log() {
+    local message="$1"
+    local timestamp=$(date '+%Y-%m-%d %H:%M:%S')
+    echo "[$timestamp] $message" >> "$LINT_LOG"
+}
+
+# Función para verificar sintaxis de bash
+check_bash_syntax() {
+    local file="$1"
+    local verbose="${2:-false}"
+    
+    if [ ! -f "$file" ]; then
+        echo "❌ Archivo no encontrado: $file"
+        return 1
+    fi
+    
+    # Verificar sintaxis con bash -n
+    if bash -n "$file" 2>&1; then
+        if [ "$verbose" = "true" ]; then
+            echo "✅ Sintaxis correcta: $file"
+        fi
+        return 0
+    else
+        echo "❌ Error de sintaxis en: $file"
+        return 1
+    fi
+}
+
+# Función para verificar permisos de ejecución
+check_execution_permissions() {
+    local file="$1"
+    local verbose="${2:-false}"
+    
+    if [ ! -f "$file" ]; then
+        echo "❌ Archivo no encontrado: $file"
+        return 1
+    fi
+    
+    if [ -x "$file" ]; then
+        if [ "$verbose" = "true" ]; then
+            echo "✅ Permisos de ejecución correctos: $file"
+        fi
+        return 0
+    else
+        echo "❌ Archivo no ejecutable: $file"
+        return 1
+    fi
+}
+
+# Función para verificar shebang
+check_shebang() {
+    local file="$1"
+    local verbose="${2:-false}"
+    
+    if [ ! -f "$file" ]; then
+        echo "❌ Archivo no encontrado: $file"
+        return 1
+    fi
+    
+    local first_line=$(head -1 "$file")
+    if [[ $first_line =~ ^#! ]]; then
+        if [ "$verbose" = "true" ]; then
+            echo "✅ Shebang presente: $file"
+        fi
+        return 0
+    else
+        echo "❌ Shebang faltante: $file"
+        return 1
+    fi
+}
+
+# Función para verificar variables de entorno
+check_env_variables() {
+    local file="$1"
+    local verbose="${2:-false}"
+    
+    if [ ! -f "$file" ]; then
+        echo "❌ Archivo no encontrado: $file"
+        return 1
+    fi
+    
+    local issues=0
+    
+    # Verificar variables no definidas
+    if grep -q '\$[A-Z_][A-Z0-9_]*' "$file" | grep -v 'MATEOS_PATH\|HOME\|USER'; then
+        echo "⚠️  Posibles variables no definidas en: $file"
+        ((issues++))
+    fi
+    
+    # Verificar uso de variables de entorno
+    if grep -q 'export ' "$file"; then
+        if [ "$verbose" = "true" ]; then
+            echo "✅ Variables exportadas encontradas: $file"
+        fi
+    fi
+    
+    return $issues
+}
+
+# Función para verificar mejores prácticas
+check_best_practices() {
+    local file="$1"
+    local verbose="${2:-false}"
+    
+    if [ ! -f "$file" ]; then
+        echo "❌ Archivo no encontrado: $file"
+        return 1
+    fi
+    
+    local issues=0
+    
+    # Verificar uso de comillas
+    if grep -q 'echo [^"]' "$file"; then
+        echo "⚠️  Considera usar comillas en echo: $file"
+        ((issues++))
+    fi
+    
+    # Verificar uso de set -e
+    if ! grep -q 'set -e' "$file"; then
+        echo "⚠️  Considera usar 'set -e' para manejo de errores: $file"
+        ((issues++))
+    fi
+    
+    # Verificar uso de set -u
+    if ! grep -q 'set -u' "$file"; then
+        echo "⚠️  Considera usar 'set -u' para variables no definidas: $file"
+        ((issues++))
+    fi
+    
+    # Verificar uso de set -o pipefail
+    if ! grep -q 'set -o pipefail' "$file"; then
+        echo "⚠️  Considera usar 'set -o pipefail' para pipes: $file"
+        ((issues++))
+    fi
+    
+    return $issues
+}
+
+# Función para verificar documentación
+check_documentation() {
+    local file="$1"
+    local verbose="${2:-false}"
+    
+    if [ ! -f "$file" ]; then
+        echo "❌ Archivo no encontrado: $file"
+        return 1
+    fi
+    
+    local issues=0
+    
+    # Verificar comentarios de encabezado
+    if ! head -5 "$file" | grep -q '^#'; then
+        echo "⚠️  Considera añadir comentarios de encabezado: $file"
+        ((issues++))
+    fi
+    
+    # Verificar descripción del script
+    if ! grep -q 'Descripción\|Description' "$file"; then
+        echo "⚠️  Considera añadir descripción del script: $file"
+        ((issues++))
+    fi
+    
+    # Verificar uso del script
+    if ! grep -q 'Uso\|Usage' "$file"; then
+        echo "⚠️  Considera añadir información de uso: $file"
+        ((issues++))
+    fi
+    
+    return $issues
+}
+
+# Función para linting completo
+lint_file() {
+    local file="$1"
+    local verbose="${2:-false}"
+    
+    if [ ! -f "$file" ]; then
+        echo "❌ Archivo no encontrado: $file"
+        return 1
+    fi
+    
+    echo "🔍 Linting archivo: $file"
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    
+    local total_issues=0
+    
+    # Verificar sintaxis
+    if ! check_bash_syntax "$file" "$verbose"; then
+        ((total_issues++))
+    fi
+    
+    # Verificar permisos
+    if ! check_execution_permissions "$file" "$verbose"; then
+        ((total_issues++))
+    fi
+    
+    # Verificar shebang
+    if ! check_shebang "$file" "$verbose"; then
+        ((total_issues++))
+    fi
+    
+    # Verificar variables
+    check_env_variables "$file" "$verbose"
+    ((total_issues += $?))
+    
+    # Verificar mejores prácticas
+    check_best_practices "$file" "$verbose"
+    ((total_issues += $?))
+    
+    # Verificar documentación
+    check_documentation "$file" "$verbose"
+    ((total_issues += $?))
+    
+    echo ""
+    if [ $total_issues -eq 0 ]; then
+        echo "✅ Linting completado sin problemas"
+        lint_log "Linting passed: $file"
+    else
+        echo "⚠️  Linting completado con $total_issues problemas"
+        lint_log "Linting issues: $file ($total_issues issues)"
+    fi
+    
+    return $total_issues
+}
+
+# Función para linting de directorio
+lint_directory() {
+    local directory="$1"
+    local verbose="${2:-false}"
+    
+    if [ ! -d "$directory" ]; then
+        echo "❌ Directorio no encontrado: $directory"
+        return 1
+    fi
+    
+    echo "🔍 Linting directorio: $directory"
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    
+    local total_files=0
+    local total_issues=0
+    
+    # Buscar archivos bash
+    local files=($(find "$directory" -name "*.sh" -o -name "mateos-*"))
+    total_files=${#files[@]}
+    
+    for file in "${files[@]}"; do
+        if [ -f "$file" ]; then
+            local file_issues=$(lint_file "$file" "$verbose")
+            ((total_issues += file_issues))
+        fi
+    done
+    
+    echo ""
+    echo "📊 Resumen de linting:"
+    echo "  📁 Archivos procesados: $total_files"
+    echo "  ⚠️  Problemas encontrados: $total_issues"
+    
+    lint_log "Directory linting: $directory ($total_files files, $total_issues issues)"
+    
+    return $total_issues
+}
+
+# Función para linting de MateOS
+lint_mateos() {
+    local component="${1:-all}"
+    local verbose="${2:-false}"
+    
+    echo "🔍 Linting MateOS: $component"
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    
+    local total_issues=0
+    
+    case "$component" in
+        "scripts"|"bin")
+            lint_directory "$MATEOS_PATH/bin" "$verbose"
+            total_issues=$?
+            ;;
+        "config")
+            lint_directory "$MATEOS_PATH/config" "$verbose"
+            total_issues=$?
+            ;;
+        "all"|*)
+            lint_directory "$MATEOS_PATH/bin" "$verbose"
+            total_issues=$?
+            ;;
+    esac
+    
+    return $total_issues
+}
+
+# Función para configurar linting
+configure_linting() {
+    local strict_mode="$1"
+    local auto_fix="$2"
+    local exclude_patterns="$3"
+    
+    if [ -z "$strict_mode" ]; then
+        echo "📋 Configuración actual de linting:"
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        
+        if [ -f "$LINT_CONFIG" ]; then
+            cat "$LINT_CONFIG"
+        else
+            echo "No hay configuración de linting"
+        fi
+        return
+    fi
+    
+    # Crear archivo de configuración
+    cat > "$LINT_CONFIG" << EOF
+# MateOS Linting Configuration
+# Configuración de linting de MateOS
+
+[general]
+strict_mode = $strict_mode
+auto_fix = ${auto_fix:-false}
+exclude_patterns = ${exclude_patterns:-"*.bak,*.tmp"}
+
+[checks]
+syntax_check = true
+permissions_check = true
+shebang_check = true
+env_variables_check = true
+best_practices_check = true
+documentation_check = true
+
+[best_practices]
+require_set_e = true
+require_set_u = true
+require_set_pipefail = true
+require_quotes = true
+require_documentation = true
+
+[exclude]
+patterns = "*.bak,*.tmp,*.log"
+directories = "backups,logs,tmp"
+EOF
+    
+    lint_log "Linting configured: strict=$strict_mode, auto_fix=${auto_fix:-false}"
+    
+    echo "✅ Configuración de linting actualizada"
+}
+
+# Función para mostrar resultados
+show_results() {
+    local lines="${1:-50}"
+    
+    echo "📋 Resultados de linting (últimas $lines líneas):"
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    
+    if [ -f "$LINT_LOG" ]; then
+        tail -n "$lines" "$LINT_LOG"
+    else
+        echo "No hay resultados de linting"
+    fi
+}
+
+# Función principal
+case "$1" in
+    "check")
+        lint_file "$2" "$3"
+        ;;
+    "directory"|"dir")
+        lint_directory "$2" "$3"
+        ;;
+    "mateos")
+        lint_mateos "$2" "$3"
+        ;;
+    "configure")
+        configure_linting "$2" "$3" "$4"
+        ;;
+    "results")
+        show_results "$2"
+        ;;
+    *)
+        echo "🔍 MateOS Linting System"
+        echo ""
+        echo "Uso: mateos-lint <comando> [argumentos]"
+        echo ""
+        echo "Comandos:"
+        echo "  check <archivo> [verbose]         - Linting de archivo individual"
+        echo "  directory <directorio> [verbose]  - Linting de directorio"
+        echo "  mateos [componente] [verbose]     - Linting de MateOS"
+        echo "  configure <strict> [auto_fix] [exclude] - Configurar linting"
+        echo "  results [líneas]                  - Mostrar resultados"
+        echo ""
+        echo "Componentes disponibles: scripts, config, all"
+        echo ""
+        echo "Ejemplos:"
+        echo "  mateos-lint check /path/to/script.sh"
+        echo "  mateos-lint directory /path/to/dir"
+        echo "  mateos-lint mateos scripts"
+        echo "  mateos-lint configure true false"
+        ;;
+esac

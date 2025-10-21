@@ -275,10 +275,80 @@ check_dependencies() {
         "uwsm-app"
     )
     
+    # Aplicaciones adicionales importantes
+    local additional_packages=(
+        "swayosd"
+        "walker"
+        "hypridle"
+        "hyprlock"
+        "hyprsunset"
+        "mako"
+        "btop"
+        "fastfetch"
+        "starship"
+        "blueberry"
+        "nautilus"
+        "chromium"
+        "nvim"
+        "git"
+        "docker"
+        "docker-compose"
+        "tailscale"
+        "steam"
+        "spotify"
+        "obsidian"
+        "signal-desktop"
+        "elephant"
+        "mangohud"
+        "base-devel"
+        "nodejs"
+        "npm"
+        "python"
+        "python-pip"
+        "rust"
+        "go"
+        "jdk-openjdk"
+        "maven"
+        "gradle"
+        "vscode"
+    )
+    
+    # Aplicaciones opcionales (no se muestran como faltantes)
+    local optional_packages=(
+        "firefox"
+        "discord"
+        "1password"
+        "lutris"
+        "wine"
+        "winetricks"
+        "proton-ge-custom"
+        "gamemode"
+        "intellij-idea-community-edition"
+    )
+    
+    # Detectar drivers de hardware necesarios
+    local hardware_packages=()
+    
+    # Detectar GPU NVIDIA
+    if lspci | grep -i nvidia &>/dev/null; then
+        hardware_packages+=("nvidia" "nvidia-utils" "nvidia-settings")
+    fi
+    
+    # Detectar GPU AMD
+    if lspci | grep -i amd &>/dev/null || lspci | grep -i radeon &>/dev/null; then
+        hardware_packages+=("vulkan-radeon")
+    fi
+    
+    # Detectar GPU Intel
+    if lspci | grep -i intel &>/dev/null; then
+        hardware_packages+=("vulkan-intel")
+    fi
+    
     local missing=0
     local present=0
     
-    # Verificar paquetes
+    print_status "$YELLOW" "🔧 Dependencias críticas:"
+    # Verificar paquetes críticos
     for package in "${critical_packages[@]}"; do
         if package_installed "$package"; then
             print_status "$GREEN" "✅ $package"
@@ -301,11 +371,55 @@ check_dependencies() {
     done
     
     echo ""
+    print_status "$YELLOW" "⭐ Aplicaciones adicionales:"
+    # Verificar aplicaciones adicionales
+    for package in "${additional_packages[@]}"; do
+        if package_installed "$package"; then
+            print_status "$GREEN" "✅ $package"
+            ((present++))
+        else
+            print_status "$RED" "❌ $package (faltante)"
+            ((missing++))
+        fi
+    done
+    
+    # Verificar drivers de hardware si se detectaron
+    if [ ${#hardware_packages[@]} -gt 0 ]; then
+        echo ""
+        print_status "$YELLOW" "🖥️  Drivers de hardware detectados:"
+        for package in "${hardware_packages[@]}"; do
+            if package_installed "$package"; then
+                print_status "$GREEN" "✅ $package"
+                ((present++))
+            else
+                print_status "$RED" "❌ $package (faltante)"
+                ((missing++))
+            fi
+        done
+    fi
+    
+    # Mostrar aplicaciones opcionales (solo si están instaladas)
+    local optional_installed=0
+    echo ""
+    print_status "$YELLOW" "🔧 Aplicaciones opcionales instaladas:"
+    for package in "${optional_packages[@]}"; do
+        if package_installed "$package"; then
+            print_status "$GREEN" "✅ $package"
+            ((optional_installed++))
+        fi
+    done
+    
+    if [ $optional_installed -eq 0 ]; then
+        print_status "$BLUE" "ℹ️  No hay aplicaciones opcionales instaladas"
+    fi
+    
+    echo ""
     print_status "$BLUE" "📊 Resumen:"
     print_status "$GREEN" "  ✅ Presentes: $present"
     if [ $missing -gt 0 ]; then
         print_status "$RED" "  ❌ Faltantes: $missing"
         print_status "$YELLOW" "💡 Ejecuta: mateos-deps-install critical"
+        print_status "$YELLOW" "💡 Para todas las aplicaciones: mateos-deps-install full"
     fi
 }
 

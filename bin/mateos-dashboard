@@ -1,0 +1,110 @@
+#!/bin/bash
+
+# MateOS Dashboard
+# Dashboard visual del sistema MateOS
+
+MATEOS_PATH="${MATEOS_PATH:-$HOME/.local/share/mateOS}"
+DASHBOARD_LOG="$HOME/.local/state/mateOS/logs/dashboard.log"
+
+# Crear directorios necesarios
+mkdir -p "$(dirname "$DASHBOARD_LOG")"
+
+# Función para mostrar dashboard principal
+show_dashboard() {
+    clear
+    echo "🖥️  MateOS Dashboard"
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo "🕐 $(date)"
+    echo ""
+    
+    # Estado del sistema
+    echo "📊 Estado del Sistema:"
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    mateos-monitor status
+    echo ""
+    
+    # Recursos
+    echo "💻 Recursos:"
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    mateos-monitor resources
+    echo ""
+    
+    # Configuraciones
+    echo "⚙️  Configuraciones:"
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    mateos-monitor configs
+    echo ""
+    
+    # Respaldos
+    echo "💾 Respaldos:"
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    mateos-monitor backups
+    echo ""
+    
+    # Plugins
+    echo "🔌 Plugins:"
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    mateos-monitor plugins
+    echo ""
+}
+
+# Función para dashboard interactivo
+interactive_dashboard() {
+    while true; do
+        show_dashboard
+        echo ""
+        echo "💡 Comandos disponibles:"
+        echo "  [r] Refrescar  [m] Monitor  [a] Alertas  [o] Optimizar  [q] Salir"
+        echo ""
+        read -p "Selecciona una opción: " choice
+        
+        case "$choice" in
+            "r"|"R")
+                continue
+                ;;
+            "m"|"M")
+                mateos-monitor all
+                read -p "Presiona Enter para continuar..."
+                ;;
+            "a"|"A")
+                mateos-alerts full
+                read -p "Presiona Enter para continuar..."
+                ;;
+            "o"|"O")
+                mateos-optimize stats
+                read -p "Presiona Enter para continuar..."
+                ;;
+            "q"|"Q")
+                echo "👋 ¡Hasta luego!"
+                break
+                ;;
+            *)
+                echo "❌ Opción no válida"
+                sleep 1
+                ;;
+        esac
+    done
+}
+
+# Función principal
+case "$1" in
+    "show")
+        show_dashboard
+        ;;
+    "interactive"|"i")
+        interactive_dashboard
+        ;;
+    *)
+        echo "🖥️  MateOS Dashboard"
+        echo ""
+        echo "Uso: mateos-dashboard <comando>"
+        echo ""
+        echo "Comandos:"
+        echo "  show        - Mostrar dashboard una vez"
+        echo "  interactive - Dashboard interactivo"
+        echo ""
+        echo "Ejemplos:"
+        echo "  mateos-dashboard show"
+        echo "  mateos-dashboard interactive"
+        ;;
+esac
