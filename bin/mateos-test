@@ -1,0 +1,498 @@
+#!/bin/bash
+
+# MateOS Testing System
+# Sistema de testing para scripts de MateOS
+
+MATEOS_PATH="${MATEOS_PATH:-$HOME/.local/share/mateOS}"
+TEST_DIR="$HOME/.config/mateOS/tests"
+TEST_RESULTS="$HOME/.local/state/mateOS/test-results.log"
+TEST_CONFIG="$HOME/.config/mateOS/test.conf"
+
+# Crear directorios necesarios
+mkdir -p "$TEST_DIR" "$(dirname "$TEST_RESULTS")" "$(dirname "$TEST_CONFIG")"
+
+# Colores para output
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+NC='\033[0m' # No Color
+
+# Función para imprimir mensajes con color
+print_status() {
+    local color="$1"
+    local message="$2"
+    echo -e "${color}${message}${NC}"
+}
+
+# Función para logging de tests
+log_test() {
+    local test_name="$1"
+    local result="$2"
+    local message="$3"
+    local timestamp=$(date '+%Y-%m-%d %H:%M:%S')
+    
+    echo "[$timestamp] $test_name:$result:$message" >> "$TEST_RESULTS"
+}
+
+# Función para ejecutar test individual
+run_test() {
+    local test_file="$1"
+    local verbose="${2:-false}"
+    
+    if [ ! -f "$test_file" ]; then
+        print_status "$RED" "❌ Test no encontrado: $test_file"
+        return 1
+    fi
+    
+    local test_name=$(basename "$test_file" .test)
+    
+    if [ "$verbose" = "true" ]; then
+        print_status "$BLUE" "🧪 Ejecutando test: $test_name"
+    fi
+    
+    # Ejecutar test
+    local start_time=$(date +%s)
+    local test_result=0
+    
+    if bash "$test_file" 2>&1; then
+        test_result=0
+    else
+        test_result=1
+    fi
+    
+    local end_time=$(date +%s)
+    local duration=$((end_time - start_time))
+    
+    # Log del resultado
+    if [ $test_result -eq 0 ]; then
+        print_status "$GREEN" "✅ $test_name (${duration}s)"
+        log_test "$test_name" "PASS" "Test passed in ${duration}s"
+    else
+        print_status "$RED" "❌ $test_name (${duration}s)"
+        log_test "$test_name" "FAIL" "Test failed in ${duration}s"
+    fi
+    
+    return $test_result
+}
+
+# Función para ejecutar todos los tests
+run_all_tests() {
+    local test_suite="${1:-all}"
+    local verbose="${2:-false}"
+    
+    print_status "$BLUE" "🧪 Ejecutando suite de tests: $test_suite"
+    echo ""
+    
+    local total_tests=0
+    local passed_tests=0
+    local failed_tests=0
+    
+    # Limpiar resultados anteriores
+    > "$TEST_RESULTS"
+    
+    # Buscar archivos de test
+    local test_files=()
+    
+    case "$test_suite" in
+        "all")
+            test_files=($(find "$TEST_DIR" -name "*.test" 2>/dev/null))
+            ;;
+        "unit")
+            test_files=($(find "$TEST_DIR" -name "*unit*.test" 2>/dev/null))
+            ;;
+        "integration")
+            test_files=($(find "$TEST_DIR" -name "*integration*.test" 2>/dev/null))
+            ;;
+        "config")
+            test_files=($(find "$TEST_DIR" -name "*config*.test" 2>/dev/null))
+            ;;
+        *)
+            test_files=($(find "$TEST_DIR" -name "*${test_suite}*.test" 2>/dev/null))
+            ;;
+    esac
+    
+    if [ ${#test_files[@]} -eq 0 ]; then
+        print_status "$YELLOW" "⚠️  No se encontraron tests para la suite: $test_suite"
+        return 1
+    fi
+    
+    # Ejecutar cada test
+    for test_file in "${test_files[@]}"; do
+        ((total_tests++))
+        
+        if run_test "$test_file" "$verbose"; then
+            ((passed_tests++))
+        else
+            ((failed_tests++))
+        fi
+    done
+    
+    # Resumen
+    echo ""
+    print_status "$BLUE" "📊 Resumen de tests:"
+    print_status "$GREEN" "  ✅ Pasados: $passed_tests"
+    if [ $failed_tests -gt 0 ]; then
+        print_status "$RED" "  ❌ Fallidos: $failed_tests"
+    fi
+    print_status "$BLUE" "  📋 Total: $total_tests"
+    
+    # Log del resumen
+    log_test "SUITE_SUMMARY" "COMPLETE" "Total:$total_tests,Passed:$passed_tests,Failed:$failed_tests"
+    
+    return $failed_tests
+}
+
+# Función para crear test template
+create_test_template() {
+    local test_name="$1"
+    local test_type="${2:-unit}"
+    
+    if [ -z "$test_name" ]; then
+        echo "❌ Error: Debes especificar un nombre para el test"
+        return 1
+    fi
+    
+    local test_file="$TEST_DIR/${test_name}.test"
+    
+    if [ -f "$test_file" ]; then
+        echo "❌ Error: El test '$test_name' ya existe"
+        return 1
+    fi
+    
+    # Crear template según el tipo
+    case "$test_type" in
+        "unit")
+            cat > "$test_file" << EOF
+#!/bin/bash
+
+# Test Unitario: $test_name
+# Tipo: $test_type
+# Creado: $(date)
+
+# Configuración del test
+TEST_NAME="$test_name"
+TEST_TYPE="$test_type"
+
+# Función de setup
+setup() {
+    echo "Setting up test: \$TEST_NAME"
+    # Configuración inicial del test
+}
+
+# Función de teardown
+teardown() {
+    echo "Tearing down test: \$TEST_NAME"
+    # Limpieza después del test
+}
+
+# Función principal del test
+test_main() {
+    echo "Running test: \$TEST_NAME"
+    
+    # Ejemplo de test
+    if [ 1 -eq 1 ]; then
+        echo "✅ Test passed"
+        return 0
+    else
+        echo "❌ Test failed"
+        return 1
+    fi
+}
+
+# Ejecutar test
+setup
+test_main
+result=\$?
+teardown
+exit \$result
+EOF
+            ;;
+        "integration")
+            cat > "$test_file" << EOF
+#!/bin/bash
+
+# Test de Integración: $test_name
+# Tipo: $test_type
+# Creado: $(date)
+
+# Configuración del test
+TEST_NAME="$test_name"
+TEST_TYPE="$test_type"
+
+# Función de setup
+setup() {
+    echo "Setting up integration test: \$TEST_NAME"
+    # Configuración inicial del test de integración
+}
+
+# Función de teardown
+teardown() {
+    echo "Tearing down integration test: \$TEST_NAME"
+    # Limpieza después del test
+}
+
+# Función principal del test
+test_main() {
+    echo "Running integration test: \$TEST_NAME"
+    
+    # Ejemplo de test de integración
+    if command -v mateos-config &>/dev/null; then
+        echo "✅ MateOS config available"
+        return 0
+    else
+        echo "❌ MateOS config not available"
+        return 1
+    fi
+}
+
+# Ejecutar test
+setup
+test_main
+result=\$?
+teardown
+exit \$result
+EOF
+            ;;
+        "config")
+            cat > "$test_file" << EOF
+#!/bin/bash
+
+# Test de Configuración: $test_name
+# Tipo: $test_type
+# Creado: $(date)
+
+# Configuración del test
+TEST_NAME="$test_name"
+TEST_TYPE="$test_type"
+
+# Función de setup
+setup() {
+    echo "Setting up config test: \$TEST_NAME"
+    # Configuración inicial del test de configuración
+}
+
+# Función de teardown
+teardown() {
+    echo "Tearing down config test: \$TEST_NAME"
+    # Limpieza después del test
+}
+
+# Función principal del test
+test_main() {
+    echo "Running config test: \$TEST_NAME"
+    
+    # Ejemplo de test de configuración
+    if [ -f "$MATEOS_PATH/config/mateos.conf" ]; then
+        echo "✅ Configuration file exists"
+        return 0
+    else
+        echo "❌ Configuration file missing"
+        return 1
+    fi
+}
+
+# Ejecutar test
+setup
+test_main
+result=\$?
+teardown
+exit \$result
+EOF
+            ;;
+    esac
+    
+    chmod +x "$test_file"
+    
+    print_status "$GREEN" "✅ Test template creado: $test_name"
+    print_status "$BLUE" "📁 Ubicación: $test_file"
+    print_status "$YELLOW" "💡 Edita el archivo para personalizar el test"
+}
+
+# Función para mostrar resultados
+show_results() {
+    local lines="${1:-50}"
+    local test_name="${2:-*}"
+    
+    echo "📋 Resultados de tests (últimas $lines líneas):"
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    
+    if [ -f "$TEST_RESULTS" ]; then
+        if [ "$test_name" = "*" ]; then
+            tail -n "$lines" "$TEST_RESULTS"
+        else
+            grep "$test_name" "$TEST_RESULTS" | tail -n "$lines"
+        fi
+    else
+        echo "No hay resultados de tests"
+    fi
+}
+
+# Función para generar reporte
+generate_report() {
+    local output_file="${1:-$TEST_DIR/test-report-$(date +%Y%m%d-%H%M%S).txt}"
+    
+    echo "📋 Generando reporte de tests..."
+    echo ""
+    
+    {
+        echo "MateOS Test Report"
+        echo "================="
+        echo "Generated: $(date)"
+        echo "System: $(uname -a)"
+        echo "User: $(whoami)"
+        echo ""
+        
+        echo "Test Summary:"
+        echo "-------------"
+        
+        # Contar resultados
+        local total_tests=$(grep -c ":" "$TEST_RESULTS" 2>/dev/null || echo "0")
+        local passed_tests=$(grep -c ":PASS:" "$TEST_RESULTS" 2>/dev/null || echo "0")
+        local failed_tests=$(grep -c ":FAIL:" "$TEST_RESULTS" 2>/dev/null || echo "0")
+        
+        echo "Total Tests: $total_tests"
+        echo "Passed: $passed_tests"
+        echo "Failed: $failed_tests"
+        
+        if [ $total_tests -gt 0 ]; then
+            local success_rate=$((passed_tests * 100 / total_tests))
+            echo "Success Rate: $success_rate%"
+        fi
+        
+        echo ""
+        echo "Recent Test Results:"
+        echo "-------------------"
+        tail -n 20 "$TEST_RESULTS" 2>/dev/null || echo "No test results available"
+        
+        echo ""
+        echo "Failed Tests:"
+        echo "-------------"
+        grep ":FAIL:" "$TEST_RESULTS" 2>/dev/null || echo "No failed tests"
+        
+    } > "$output_file"
+    
+    print_status "$GREEN" "✅ Reporte generado: $output_file"
+}
+
+# Función para limpiar tests
+clean_tests() {
+    local confirm="${1:-false}"
+    
+    if [ "$confirm" != "true" ]; then
+        echo "⚠️  ¿Estás seguro de que quieres limpiar todos los tests?"
+        echo "Esta acción no se puede deshacer."
+        read -p "Escribe 'yes' para confirmar: " confirm_input
+        
+        if [ "$confirm_input" != "yes" ]; then
+            echo "❌ Operación cancelada"
+            return 1
+        fi
+    fi
+    
+    # Limpiar archivos de test
+    rm -f "$TEST_DIR"/*.test
+    
+    # Limpiar resultados
+    > "$TEST_RESULTS"
+    
+    print_status "$GREEN" "✅ Tests limpiados"
+}
+
+# Función para configurar testing
+configure_testing() {
+    local test_level="$1"
+    local auto_run="$2"
+    local coverage="$3"
+    
+    if [ -z "$test_level" ]; then
+        echo "📋 Configuración actual de testing:"
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        
+        if [ -f "$TEST_CONFIG" ]; then
+            cat "$TEST_CONFIG"
+        else
+            echo "No hay configuración de testing"
+        fi
+        return
+    fi
+    
+    # Crear archivo de configuración
+    cat > "$TEST_CONFIG" << EOF
+# MateOS Testing Configuration
+# Configuración de testing de MateOS
+
+[general]
+test_level = $test_level
+auto_run = ${auto_run:-false}
+coverage = ${coverage:-false}
+
+[suites]
+unit_tests = true
+integration_tests = true
+config_tests = true
+performance_tests = false
+
+[output]
+verbose = false
+log_results = true
+generate_reports = true
+export_format = txt
+
+[coverage]
+include_scripts = true
+include_configs = true
+include_themes = false
+EOF
+    
+    print_status "$GREEN" "✅ Configuración de testing actualizada"
+}
+
+# Función principal
+case "$1" in
+    "run")
+        run_test "$2" "$3"
+        ;;
+    "suite")
+        run_all_tests "$2" "$3"
+        ;;
+    "create")
+        create_test_template "$2" "$3"
+        ;;
+    "results")
+        show_results "$2" "$3"
+        ;;
+    "report")
+        generate_report "$2"
+        ;;
+    "clean")
+        clean_tests "$2"
+        ;;
+    "configure")
+        configure_testing "$2" "$3" "$4"
+        ;;
+    *)
+        echo "🧪 MateOS Testing System"
+        echo ""
+        echo "Uso: mateos-test <comando> [argumentos]"
+        echo ""
+        echo "Comandos:"
+        echo "  run <archivo_test> [verbose]     - Ejecutar test individual"
+        echo "  suite <tipo> [verbose]           - Ejecutar suite de tests"
+        echo "  create <nombre> [tipo]           - Crear template de test"
+        echo "  results [líneas] [test_name]     - Mostrar resultados"
+        echo "  report [archivo]                 - Generar reporte"
+        echo "  clean [confirm]                  - Limpiar tests"
+        echo "  configure <nivel> [auto_run] [coverage] - Configurar testing"
+        echo ""
+        echo "Tipos de test: unit, integration, config"
+        echo "Suites disponibles: all, unit, integration, config"
+        echo ""
+        echo "Ejemplos:"
+        echo "  mateos-test create my-test unit"
+        echo "  mateos-test suite all verbose"
+        echo "  mateos-test run my-test.test true"
+        echo "  mateos-test results 100"
+        echo "  mateos-test configure basic true false"
+        ;;
+esac

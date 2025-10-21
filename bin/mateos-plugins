@@ -1,0 +1,545 @@
+#!/bin/bash
+
+# MateOS Plugins System
+# Sistema de plugins para MateOS
+
+MATEOS_PATH="${MATEOS_PATH:-$HOME/.local/share/mateOS}"
+PLUGINS_DIR="$HOME/.config/mateOS/plugins"
+PLUGINS_CONFIG="$HOME/.config/mateOS/plugins.conf"
+PLUGINS_LOG="$HOME/.local/state/mateOS/logs/plugins.log"
+
+# Crear directorios necesarios
+mkdir -p "$PLUGINS_DIR" "$(dirname "$PLUGINS_LOG")"
+
+# Función para logging de plugins
+plugin_log() {
+    local message="$1"
+    local timestamp=$(date '+%Y-%m-%d %H:%M:%S')
+    echo "[$timestamp] $message" >> "$PLUGINS_LOG"
+}
+
+# Función para instalar plugin
+install_plugin() {
+    local plugin_source="$1"
+    local plugin_name="$2"
+    
+    if [ -z "$plugin_source" ]; then
+        echo "❌ Error: Debes especificar una fuente del plugin"
+        echo "Uso: mateos-plugins install <fuente> [nombre]"
+        return 1
+    fi
+    
+    if [ -z "$plugin_name" ]; then
+        plugin_name=$(basename "$plugin_source" .git)
+    fi
+    
+    local plugin_dir="$PLUGINS_DIR/$plugin_name"
+    
+    if [ -d "$plugin_dir" ]; then
+        echo "❌ Error: El plugin '$plugin_name' ya está instalado"
+        return 1
+    fi
+    
+    echo "📦 Instalando plugin: $plugin_name"
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    
+    # Clonar plugin
+    if git clone "$plugin_source" "$plugin_dir" 2>/dev/null; then
+        echo "✅ Plugin clonado exitosamente"
+    else
+        echo "❌ Error clonando plugin desde: $plugin_source"
+        return 1
+    fi
+    
+    # Verificar estructura del plugin
+    if [ -f "$plugin_dir/plugin.conf" ]; then
+        echo "✅ Configuración del plugin encontrada"
+    else
+        echo "⚠️  Advertencia: No se encontró plugin.conf"
+    fi
+    
+    # Ejecutar script de instalación si existe
+    if [ -f "$plugin_dir/install.sh" ]; then
+        echo "🔧 Ejecutando script de instalación..."
+        if bash "$plugin_dir/install.sh"; then
+            echo "✅ Script de instalación ejecutado"
+        else
+            echo "❌ Error ejecutando script de instalación"
+        fi
+    fi
+    
+    # Registrar plugin
+    echo "$plugin_name:$plugin_source:$(date)" >> "$PLUGINS_CONFIG"
+    
+    plugin_log "Plugin installed: $plugin_name from $plugin_source"
+    
+    echo "✅ Plugin instalado exitosamente: $plugin_name"
+}
+
+# Función para desinstalar plugin
+uninstall_plugin() {
+    local plugin_name="$1"
+    local confirm="${2:-false}"
+    
+    if [ -z "$plugin_name" ]; then
+        echo "❌ Error: Debes especificar un nombre de plugin"
+        return 1
+    fi
+    
+    local plugin_dir="$PLUGINS_DIR/$plugin_name"
+    
+    if [ ! -d "$plugin_dir" ]; then
+        echo "❌ Error: El plugin '$plugin_name' no está instalado"
+        return 1
+    fi
+    
+    if [ "$confirm" != "true" ]; then
+        echo "⚠️  ¿Estás seguro de que quieres desinstalar el plugin '$plugin_name'?"
+        echo "Esta acción no se puede deshacer."
+        read -p "Escribe 'yes' para confirmar: " confirm_input
+        
+        if [ "$confirm_input" != "yes" ]; then
+            echo "❌ Operación cancelada"
+            return 1
+        fi
+    fi
+    
+    echo "🗑️  Desinstalando plugin: $plugin_name"
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    
+    # Ejecutar script de desinstalación si existe
+    if [ -f "$plugin_dir/uninstall.sh" ]; then
+        echo "🔧 Ejecutando script de desinstalación..."
+        if bash "$plugin_dir/uninstall.sh"; then
+            echo "✅ Script de desinstalación ejecutado"
+        else
+            echo "❌ Error ejecutando script de desinstalación"
+        fi
+    fi
+    
+    # Eliminar directorio del plugin
+    rm -rf "$plugin_dir"
+    
+    # Remover de configuración
+    sed -i "/^$plugin_name:/d" "$PLUGINS_CONFIG"
+    
+    plugin_log "Plugin uninstalled: $plugin_name"
+    
+    echo "✅ Plugin desinstalado exitosamente: $plugin_name"
+}
+
+# Función para listar plugins
+list_plugins() {
+    local status="${1:-all}"
+    
+    echo "📋 Plugins de MateOS:"
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    
+    if [ ! -f "$PLUGINS_CONFIG" ]; then
+        echo "No hay plugins instalados"
+        return
+    fi
+    
+    while IFS=: read -r name source date; do
+        if [ -n "$name" ]; then
+            local plugin_dir="$PLUGINS_DIR/$name"
+            local plugin_status=""
+            
+            if [ -d "$plugin_dir" ]; then
+                plugin_status="✅ Instalado"
+            else
+                plugin_status="❌ Roto"
+            fi
+            
+            case "$status" in
+                "installed")
+                    if [ -d "$plugin_dir" ]; then
+                        echo "  $plugin_status $name ($source)"
+                    fi
+                    ;;
+                "broken")
+                    if [ ! -d "$plugin_dir" ]; then
+                        echo "  $plugin_status $name ($source)"
+                    fi
+                    ;;
+                "all"|*)
+                    echo "  $plugin_status $name ($source)"
+                    ;;
+            esac
+        fi
+    done < "$PLUGINS_CONFIG"
+}
+
+# Función para activar plugin
+activate_plugin() {
+    local plugin_name="$1"
+    
+    if [ -z "$plugin_name" ]; then
+        echo "❌ Error: Debes especificar un nombre de plugin"
+        return 1
+    fi
+    
+    local plugin_dir="$PLUGINS_DIR/$plugin_name"
+    
+    if [ ! -d "$plugin_dir" ]; then
+        echo "❌ Error: El plugin '$plugin_name' no está instalado"
+        return 1
+    fi
+    
+    echo "🔌 Activando plugin: $plugin_name"
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    
+    # Ejecutar script de activación si existe
+    if [ -f "$plugin_dir/activate.sh" ]; then
+        echo "🔧 Ejecutando script de activación..."
+        if bash "$plugin_dir/activate.sh"; then
+            echo "✅ Plugin activado"
+        else
+            echo "❌ Error activando plugin"
+            return 1
+        fi
+    else
+        echo "ℹ️  No hay script de activación disponible"
+    fi
+    
+    # Marcar como activo en configuración
+    sed -i "s/^$plugin_name:/$plugin_name:active:/" "$PLUGINS_CONFIG"
+    
+    plugin_log "Plugin activated: $plugin_name"
+    
+    echo "✅ Plugin activado exitosamente: $plugin_name"
+}
+
+# Función para desactivar plugin
+deactivate_plugin() {
+    local plugin_name="$1"
+    
+    if [ -z "$plugin_name" ]; then
+        echo "❌ Error: Debes especificar un nombre de plugin"
+        return 1
+    fi
+    
+    local plugin_dir="$PLUGINS_DIR/$plugin_name"
+    
+    if [ ! -d "$plugin_dir" ]; then
+        echo "❌ Error: El plugin '$plugin_name' no está instalado"
+        return 1
+    fi
+    
+    echo "🔌 Desactivando plugin: $plugin_name"
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    
+    # Ejecutar script de desactivación si existe
+    if [ -f "$plugin_dir/deactivate.sh" ]; then
+        echo "🔧 Ejecutando script de desactivación..."
+        if bash "$plugin_dir/deactivate.sh"; then
+            echo "✅ Plugin desactivado"
+        else
+            echo "❌ Error desactivando plugin"
+            return 1
+        fi
+    else
+        echo "ℹ️  No hay script de desactivación disponible"
+    fi
+    
+    # Marcar como inactivo en configuración
+    sed -i "s/^$plugin_name:active:/$plugin_name:inactive:/" "$PLUGINS_CONFIG"
+    
+    plugin_log "Plugin deactivated: $plugin_name"
+    
+    echo "✅ Plugin desactivado exitosamente: $plugin_name"
+}
+
+# Función para actualizar plugin
+update_plugin() {
+    local plugin_name="$1"
+    
+    if [ -z "$plugin_name" ]; then
+        echo "❌ Error: Debes especificar un nombre de plugin"
+        return 1
+    fi
+    
+    local plugin_dir="$PLUGINS_DIR/$plugin_name"
+    
+    if [ ! -d "$plugin_dir" ]; then
+        echo "❌ Error: El plugin '$plugin_name' no está instalado"
+        return 1
+    fi
+    
+    echo "🔄 Actualizando plugin: $plugin_name"
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    
+    cd "$plugin_dir"
+    
+    # Actualizar desde git
+    if git pull origin main 2>/dev/null; then
+        echo "✅ Plugin actualizado desde repositorio"
+    else
+        echo "❌ Error actualizando plugin desde repositorio"
+        return 1
+    fi
+    
+    # Ejecutar script de actualización si existe
+    if [ -f "$plugin_dir/update.sh" ]; then
+        echo "🔧 Ejecutando script de actualización..."
+        if bash "$plugin_dir/update.sh"; then
+            echo "✅ Script de actualización ejecutado"
+        else
+            echo "❌ Error ejecutando script de actualización"
+        fi
+    fi
+    
+    plugin_log "Plugin updated: $plugin_name"
+    
+    echo "✅ Plugin actualizado exitosamente: $plugin_name"
+}
+
+# Función para crear plugin template
+create_plugin_template() {
+    local plugin_name="$1"
+    local description="$2"
+    
+    if [ -z "$plugin_name" ]; then
+        echo "❌ Error: Debes especificar un nombre para el plugin"
+        return 1
+    fi
+    
+    local plugin_dir="$PLUGINS_DIR/$plugin_name"
+    
+    if [ -d "$plugin_dir" ]; then
+        echo "❌ Error: El plugin '$plugin_name' ya existe"
+        return 1
+    fi
+    
+    echo "📝 Creando template de plugin: $plugin_name"
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    
+    mkdir -p "$plugin_dir"
+    
+    # Crear archivo de configuración del plugin
+    cat > "$plugin_dir/plugin.conf" << EOF
+# MateOS Plugin Configuration
+# Configuración del plugin: $plugin_name
+
+[plugin]
+name = "$plugin_name"
+description = "${description:-Plugin personalizado para MateOS}"
+version = "1.0.0"
+author = "$(whoami)"
+created = "$(date)"
+
+[dependencies]
+mateOS_version = "1.0.0"
+required_scripts = "mateos-config,mateos-profile"
+
+[hooks]
+pre_install = "pre_install.sh"
+post_install = "post_install.sh"
+pre_uninstall = "pre_uninstall.sh"
+post_uninstall = "post_uninstall.sh"
+activate = "activate.sh"
+deactivate = "deactivate.sh"
+update = "update.sh"
+EOF
+    
+    # Crear script de instalación
+    cat > "$plugin_dir/install.sh" << EOF
+#!/bin/bash
+# Plugin Installation Script
+# Script de instalación del plugin: $plugin_name
+
+echo "Installing plugin: $plugin_name"
+echo "Description: ${description:-Plugin personalizado para MateOS}"
+
+# Crear directorios necesarios
+mkdir -p "\$HOME/.config/mateOS/plugins/$plugin_name"
+
+# Copiar archivos del plugin
+cp -r . "\$HOME/.config/mateOS/plugins/$plugin_name/"
+
+echo "Plugin $plugin_name installed successfully"
+EOF
+    
+    chmod +x "$plugin_dir/install.sh"
+    
+    # Crear script de desinstalación
+    cat > "$plugin_dir/uninstall.sh" << EOF
+#!/bin/bash
+# Plugin Uninstallation Script
+# Script de desinstalación del plugin: $plugin_name
+
+echo "Uninstalling plugin: $plugin_name"
+
+# Eliminar archivos del plugin
+rm -rf "\$HOME/.config/mateOS/plugins/$plugin_name"
+
+echo "Plugin $plugin_name uninstalled successfully"
+EOF
+    
+    chmod +x "$plugin_dir/uninstall.sh"
+    
+    # Crear script de activación
+    cat > "$plugin_dir/activate.sh" << EOF
+#!/bin/bash
+# Plugin Activation Script
+# Script de activación del plugin: $plugin_name
+
+echo "Activating plugin: $plugin_name"
+
+# Añadir comandos de activación aquí
+# Ejemplo: exportar variables, cargar configuraciones, etc.
+
+echo "Plugin $plugin_name activated successfully"
+EOF
+    
+    chmod +x "$plugin_dir/activate.sh"
+    
+    # Crear script de desactivación
+    cat > "$plugin_dir/deactivate.sh" << EOF
+#!/bin/bash
+# Plugin Deactivation Script
+# Script de desactivación del plugin: $plugin_name
+
+echo "Deactivating plugin: $plugin_name"
+
+# Añadir comandos de desactivación aquí
+# Ejemplo: limpiar variables, restaurar configuraciones, etc.
+
+echo "Plugin $plugin_name deactivated successfully"
+EOF
+    
+    chmod +x "$plugin_dir/deactivate.sh"
+    
+    # Crear script de actualización
+    cat > "$plugin_dir/update.sh" << EOF
+#!/bin/bash
+# Plugin Update Script
+# Script de actualización del plugin: $plugin_name
+
+echo "Updating plugin: $plugin_name"
+
+# Añadir comandos de actualización aquí
+# Ejemplo: migrar configuraciones, actualizar dependencias, etc.
+
+echo "Plugin $plugin_name updated successfully"
+EOF
+    
+    chmod +x "$plugin_dir/update.sh"
+    
+    # Crear README
+    cat > "$plugin_dir/README.md" << EOF
+# $plugin_name
+
+${description:-Plugin personalizado para MateOS}
+
+## Instalación
+
+\`\`\`bash
+mateos-plugins install $plugin_name
+\`\`\`
+
+## Uso
+
+[Describe cómo usar el plugin aquí]
+
+## Configuración
+
+[Describe la configuración del plugin aquí]
+
+## Desinstalación
+
+\`\`\`bash
+mateos-plugins uninstall $plugin_name
+\`\`\`
+EOF
+    
+    plugin_log "Plugin template created: $plugin_name"
+    
+    echo "✅ Template de plugin creado: $plugin_name"
+    echo "📁 Ubicación: $plugin_dir"
+    echo "💡 Edita los archivos para personalizar el plugin"
+}
+
+# Función para mostrar información del plugin
+show_plugin_info() {
+    local plugin_name="$1"
+    
+    if [ -z "$plugin_name" ]; then
+        echo "❌ Error: Debes especificar un nombre de plugin"
+        return 1
+    fi
+    
+    local plugin_dir="$PLUGINS_DIR/$plugin_name"
+    
+    if [ ! -d "$plugin_dir" ]; then
+        echo "❌ Error: El plugin '$plugin_name' no está instalado"
+        return 1
+    fi
+    
+    echo "📋 Información del plugin: $plugin_name"
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    
+    # Mostrar configuración del plugin
+    if [ -f "$plugin_dir/plugin.conf" ]; then
+        echo "Configuración:"
+        cat "$plugin_dir/plugin.conf"
+        echo ""
+    fi
+    
+    # Mostrar README si existe
+    if [ -f "$plugin_dir/README.md" ]; then
+        echo "Documentación:"
+        cat "$plugin_dir/README.md"
+    fi
+}
+
+# Función principal
+case "$1" in
+    "install")
+        install_plugin "$2" "$3"
+        ;;
+    "uninstall")
+        uninstall_plugin "$2" "$3"
+        ;;
+    "list"|"ls")
+        list_plugins "$2"
+        ;;
+    "activate")
+        activate_plugin "$2"
+        ;;
+    "deactivate")
+        deactivate_plugin "$2"
+        ;;
+    "update")
+        update_plugin "$2"
+        ;;
+    "create")
+        create_plugin_template "$2" "$3"
+        ;;
+    "info")
+        show_plugin_info "$2"
+        ;;
+    *)
+        echo "🔌 MateOS Plugins System"
+        echo ""
+        echo "Uso: mateos-plugins <comando> [argumentos]"
+        echo ""
+        echo "Comandos:"
+        echo "  install <fuente> [nombre]        - Instalar plugin"
+        echo "  uninstall <nombre> [confirm]     - Desinstalar plugin"
+        echo "  list [status]                    - Listar plugins"
+        echo "  activate <nombre>                - Activar plugin"
+        echo "  deactivate <nombre>              - Desactivar plugin"
+        echo "  update <nombre>                  - Actualizar plugin"
+        echo "  create <nombre> [descripción]     - Crear template de plugin"
+        echo "  info <nombre>                    - Mostrar información del plugin"
+        echo ""
+        echo "Estados disponibles: all, installed, broken"
+        echo ""
+        echo "Ejemplos:"
+        echo "  mateos-plugins install https://github.com/user/plugin.git"
+        echo "  mateos-plugins list installed"
+        echo "  mateos-plugins activate my-plugin"
+        echo "  mateos-plugins create my-plugin 'Mi plugin personalizado'"
+        ;;
+esac

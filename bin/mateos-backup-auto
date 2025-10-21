@@ -27,9 +27,16 @@ create_backup() {
     # Crear directorio de respaldo
     mkdir -p "$backup_path"
     
-    # Respaldar configuraciones de MateOS
+    # Respaldar configuraciones de MateOS (excluyendo backups para evitar recursión)
     if [ -d "$HOME/.config/mateOS" ]; then
-        cp -r "$HOME/.config/mateOS" "$backup_path/"
+        # Crear directorio de destino
+        mkdir -p "$backup_path/mateOS"
+        # Copiar excluyendo el directorio de backups para evitar recursión
+        if command -v rsync &>/dev/null; then
+            rsync -av --exclude='backups' "$HOME/.config/mateOS/" "$backup_path/mateOS/"
+        else
+            find "$HOME/.config/mateOS" -maxdepth 1 -not -name "backups" -not -path "$HOME/.config/mateOS" -exec cp -r {} "$backup_path/mateOS/" \;
+        fi
         log "Configuraciones de MateOS respaldadas"
     fi
     
